@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1761236773030",
+    "fullName": "Test User",
+    "email": "test@example.com",
+    "passwordHash": "$2a$10$U6jDt/8Qa.qAbXwKiqA5Xu/evqwKLO1zb8BhwuDkAJ/ubCDFpyLHy"
+  },
+  {
+    "id": "1761239472993",
+    "fullName": "Mongo Test",
+    "email": "mongo-test@example.com",
+    "passwordHash": "$2a$10$DhPhkMf82eg7Zwps9q/eaObitlOxpmv/jSIKNZxR3j/tfcPSYg3pC"
+  }
+]
