@@ -22,6 +22,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', require('./routes/profile'));
 app.use('/api/assessment', require('./routes/assessment'));
+app.use('/api/upload', require('./routes/upload'));
 
 app.get("/", async(req, res) => {
 

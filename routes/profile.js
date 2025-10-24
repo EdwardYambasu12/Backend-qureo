@@ -33,4 +33,24 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
+// PATCH /api/profile/avatar - update only the avatar field (accepts URL/base64)
+router.patch('/avatar', auth, async (req, res) => {
+  try {
+    const { avatar } = req.body;
+    if (!avatar) return res.status(400).json({ message: 'avatar is required' });
+
+    let profile = await Profile.findOne({ user: req.userId });
+    if (!profile) {
+      profile = new Profile({ user: req.userId, avatar });
+    } else {
+      profile.avatar = avatar;
+    }
+    await profile.save();
+    res.json({ profile });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;
