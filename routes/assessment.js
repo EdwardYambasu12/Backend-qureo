@@ -7,7 +7,8 @@ const auth = require('../middleware/auth');
 router.get('/', auth, async (req, res) => {
   try {
     const items = await HealthAssessment.find({ user: req.userId }).sort({ createdAt: -1 }).limit(50);
-    res.json({ items });
+    // return under `assessments` to match frontend expectations
+    res.json({ assessments: items });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
