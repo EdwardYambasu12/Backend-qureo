@@ -6,7 +6,8 @@ const auth = require('../middleware/auth');
 // GET /api/profile - get current user's profile
 router.get('/', auth, async (req, res) => {
   try {
-    const profile = await Profile.findOne({ user: req.userId });
+    const uid = await req.userId;
+    const profile = await Profile.findOne({ user: uid });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
     res.json({ profile });
   } catch (err) {
@@ -19,9 +20,10 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const data = req.body;
-    let profile = await Profile.findOne({ user: req.userId });
+    const uid = req.userId;
+    let profile = await Profile.findOne({ user: uid });
     if (!profile) {
-      profile = new Profile({ user: req.userId, ...data });
+      profile = new Profile({ user: uid, ...data });
     } else {
       Object.assign(profile, data);
     }
@@ -38,10 +40,10 @@ router.patch('/avatar', auth, async (req, res) => {
   try {
     const { avatar } = req.body;
     if (!avatar) return res.status(400).json({ message: 'avatar is required' });
-
-    let profile = await Profile.findOne({ user: req.userId });
+    const uid = req.userId;
+    let profile = await Profile.findOne({ user: uid });
     if (!profile) {
-      profile = new Profile({ user: req.userId, avatar });
+      profile = new Profile({ user: uid, avatar });
     } else {
       profile.avatar = avatar;
     }

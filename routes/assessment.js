@@ -19,7 +19,8 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const data = req.body;
-    const a = new HealthAssessment({ user: req.userId, ...data });
+    const uid = req.userId;
+    const a = new HealthAssessment({ user: uid, ...data });
     await a.save();
     res.status(201).json({ assessment: a });
   } catch (err) {
