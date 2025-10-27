@@ -10,23 +10,21 @@ const User = require('../models/User');
 
 // Helper function to get consistent cookie options
 function getCookieOptions(isRefreshToken = false) {
-  // Most permissive cookie settings for development
   const opts = {
-    httpOnly: false,      // Allow JS access for debugging
-    sameSite: 'none',     // Allow cross-site
-    secure: true,         // Required when sameSite is 'none'
-    domain: 'localhost',  // Explicitly set domain
-    path: '/'            // Available on all paths
+    httpOnly: true,
+    sameSite: 'none', // needed for cross-site (Vercel <-> Render)
+    secure: true,     // required when sameSite='none'
+    path: '/',        // apply to all routes
   };
-  
+
   if (isRefreshToken) {
-    opts.maxAge = REFRESH_EXPIRES_SEC * 1000;  // 30 days
+    opts.maxAge = REFRESH_EXPIRES_SEC * 1000;
   }
-  
+
   if (process.env.NODE_ENV !== 'production') {
     console.log(`Cookie options for ${isRefreshToken ? 'refresh' : 'access'} token:`, opts);
   }
-  
+
   return opts;
 }
 
