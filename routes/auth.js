@@ -237,51 +237,66 @@ router.post('/refresh', async (req, res) => {
     if (process.env.NODE_ENV !== 'production') {
       console.log('\n🔄 Refresh Token Debug:');
       console.log('📦 Request cookies:', req.cookies);
+      console.log('📦 Request headers:', req.headers);
     }
 
-  const {refreshToken} = req.cookies?.refresh_token || req.body?.refresh_token || req.headers['x-refresh-token'];
+    
+    const refreshToken =
+      req.headers['x-refresh-token'] ||
+      req.cookies?.refresh_token ||
+      req.body?.refresh_token;
 
-    if (!refresh_token) {
+    if (!refreshToken) {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('❌ No refresh token in cookies');
+        console.log('❌ No refresh token found');
       }
       return res.status(401).json({ message: 'No refresh token' });
     }
 
     if (process.env.NODE_ENV !== 'production') {
-      console.log('🔑 Received refresh token:', refresh_token.substring(0,6) + '...');
+      console.log('🔑 Received refresh token:', refreshToken.substring(0, 6) + '...');
     }
 
     const user = await User.findOne({ refreshToken });
-    
+
     if (!user) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('❌ No user found with this refresh token');
-        // Find user by email to compare tokens
         const anyUser = await User.findOne({});
         if (anyUser) {
-          console.log('💡 Sample user token:', anyUser.refreshToken ? anyUser.refreshToken.substring(0,6) + '...' : 'none');
+          console.log('💡 Sample user token:', anyUser.refreshToken ? anyUser.refreshToken.substring(0, 6) + '...' : 'none');
         }
       }
       return res.status(401).json({ message: 'Invalid refresh token' });
     }
 
-    const accessToken = jwt.sign({ id: user._id.toString(), email: user.email }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: ACCESS_EXPIRES });
+    const accessToken = jwt.sign(
+      { id: user._id.toString(), email: user.email },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: ACCESS_EXPIRES }
+    );
+
     const sameSite = process.env.COOKIE_SAMESITE || 'none';
-    const cookieOpts = { 
-      httpOnly: true, 
+    const cookieOpts = {
+      httpOnly: true,
       sameSite: sameSite,
-      secure: sameSite === 'none' ? true : process.env.NODE_ENV === 'production', // must be secure if sameSite=none
-      path: '/' // ensure cookie is available for all paths
+      secure: sameSite === 'none' ? true : process.env.NODE_ENV === 'production',
+      path: '/',
     };
+
     res.cookie('access_token', accessToken, cookieOpts);
-    res.json({ user: { id: user._id, fullName: user.fullName, email: user.email } });
+    res.json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 // Logout endpoint - clear cookies and remove refresh token
 router.post('/logout', async (req, res) => {
   try {
