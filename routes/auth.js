@@ -285,13 +285,14 @@ router.post('/refresh', async (req, res) => {
     };
 
     res.cookie('access_token', accessToken, cookieOpts);
-    res.json({
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-      },
-    });
+   res.json({
+  accessToken, // ✅ send token in response body
+  user: {
+    id: user._id,
+    fullName: user.fullName,
+    email: user.email,
+  },
+});
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -316,39 +317,28 @@ router.post('/logout', async (req, res) => {
 // Me endpoint - validate access_token cookie
 router.get('/me', async (req, res) => {
   try {
-    const { access_token } = req.cookies || {};
-    if (!access_token) return res.status(401).json({ message: 'Not authenticated' });
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : null;
+
+    if (!token) {
+      return res.status(401).json({ message: 'Not authenticated' });
+    }
 
     try {
-      const payload = jwt.verify(access_token, process.env.JWT_SECRET || 'dev-secret');
+      const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
       const user = await User.findById(payload.id).select('-passwordHash -refreshToken');
-      if (!user) return res.status(401).json({ message: 'Not authenticated' });
-      return res.json({ user });
-    } catch (e) {
-      // If token invalid/expired, attempt server-side refresh using refresh_token cookie (convenience)
-      console.error('Access token verify failed:', e && e.name ? e.name : e);
-      try {
-        const { refresh_token } = req.cookies || {};
-        if (!refresh_token) return res.status(401).json({ message: 'Invalid token' });
-
-        const user = await User.findOne({ refreshToken: refresh_token });
-        if (!user) return res.status(401).json({ message: 'Invalid refresh token' });
-
-        // issue a new access token
-        const accessToken = jwt.sign({ id: user._id.toString(), email: user.email }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: ACCESS_EXPIRES });
-        const cookieOpts = { httpOnly: true, sameSite: process.env.COOKIE_SAMESITE || 'none', secure: process.env.NODE_ENV === 'production' };
-        res.cookie('access_token', accessToken, cookieOpts);
-
-        const safeUser = await User.findById(user._id).select('-passwordHash -refreshToken');
-        return res.json({ user: safeUser });
-      } catch (innerErr) {
-        console.error('Refresh during /me failed:', innerErr);
-        return res.status(401).json({ message: 'Invalid token' });
+      if (!user) {
+        return res.status(401).json({ message: 'User not found' });
       }
+      return res.json({ user });
+    } catch (err) {
+      console.error('Access token verification failed:', err?.name || err);
+      return res.status(401).json({ message: 'Invalid or expired token' });
     }
   } catch (err) {
-    console.error(err);
+    console.error('Server error in /me:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
-
