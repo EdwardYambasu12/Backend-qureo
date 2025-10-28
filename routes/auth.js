@@ -97,8 +97,21 @@ router.post('/signup', async (req, res) => {
     });
 
     // Set auth cookies
-    res.cookie('access_token', accessToken, accessTokenOpts);
-    res.cookie('refresh_token', refreshToken, refreshTokenOpts);
+   
+res.cookie('refresh_token', refreshToken, {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  path: '/',
+  maxAge: REFRESH_EXPIRES_SEC * 1000,
+});
+
+res.cookie('access_token', accessToken, {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  path: '/',
+});
 
     // Log response headers and cookies in development
     if (process.env.NODE_ENV !== 'production') {
@@ -125,7 +138,10 @@ router.post('/signup', async (req, res) => {
       };
     }
 
-    res.json(responseData);
+    res.json({
+  ...responseData,
+  refreshToken // 👈 send refresh token to frontend
+});
   } catch (error) {
     console.error('Error setting cookies:', error);
     res.status(500).json({ message: 'Error setting cookies' });
@@ -203,7 +219,10 @@ router.post('/signin', async (req, res) => {
   res.cookie('access_token', accessToken, cookieOpts);
   res.cookie('refresh_token', refreshToken, { ...cookieOpts, maxAge: REFRESH_EXPIRES_SEC * 1000 });
 
-    res.json({ user: { id: user._id, fullName: user.fullName, email: user.email } });
+   res.json({
+  user: { id: user._id, fullName: user.fullName, email: user.email },
+  refreshToken // 👈 send refresh token to frontend
+});
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -220,8 +239,8 @@ router.post('/refresh', async (req, res) => {
       console.log('📦 Request cookies:', req.cookies);
     }
 
-    const { refresh_token } = req.cookies || {};
-    
+  const {refreshToken} = req.cookies?.refresh_token || req.body?.refresh_token || req.headers['x-refresh-token'];
+
     if (!refresh_token) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('❌ No refresh token in cookies');
@@ -233,7 +252,7 @@ router.post('/refresh', async (req, res) => {
       console.log('🔑 Received refresh token:', refresh_token.substring(0,6) + '...');
     }
 
-    const user = await User.findOne({ refreshToken: refresh_token });
+    const user = await User.findOne({ refreshToken });
     
     if (!user) {
       if (process.env.NODE_ENV !== 'production') {
