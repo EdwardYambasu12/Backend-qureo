@@ -9,8 +9,11 @@ const assessmentRoutes = require('./routes/assessment');
 const assessment = require('./models/HealthAssessment');
 const profile = require('./models/Profile');
 const users = require('./models/User');
+const medicineRoutes = require('./routes/medicine');
 
 const app = express();
+app.use(cookieParser());
+app.use(express.json());
 
 // 🧩 1️⃣ Configure CORS for development
 const allowedOrigins = [
@@ -26,10 +29,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-refresh-token'],
 }));
 
+app.use('/api/medicines', medicineRoutes);
 
 // 🧩 2️ Middlewares
-app.use(cookieParser());
-app.use(express.json());
+
 
 // Debug middleware to log requests and cookies
 if (process.env.NODE_ENV !== 'production') {
