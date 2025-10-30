@@ -4,21 +4,7 @@ const Medicine = require('../models/Medicine');
 
 
 
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const medicine = await Medicine.findById(id);
 
-    if (!medicine) {
-      return res.status(404).json({ message: 'Medicine not found' });
-    }
-
-    res.json({ medicine });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
 // ✅ Add new medicine
 router.post('/', async (req, res) => {
   try {
@@ -112,6 +98,32 @@ router.patch('/:id/review', async (req, res) => {
   }
 });
 
+
+// GET /api/medicines/related/:id
+router.get('/related/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the current medicine
+    const current = await Medicine.findById(id);
+    if (!current) return res.status(404).json({ message: 'Medicine not found' });
+
+    // Find related medicines by category or drugClass, excluding the current one
+    const related = await Medicine.find({
+      _id: { $ne: id },
+      $or: [
+        { category: current.category },
+        { drugClass: current.drugClass },
+      ]
+    }).limit(8); // limit results for frontend display
+
+    res.json({ related });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch related medicines', error: err.message });
+  }
+});
+
 // ✅ Get featured products
 router.get('/featured', async (req, res) => {
   try {
@@ -148,4 +160,19 @@ router.get('/low-stock', async (req, res) => {
   }
 });
 
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const medicine = await Medicine.findById(id);
+
+    if (!medicine) {
+      return res.status(404).json({ message: 'Medicine not found' });
+    }
+
+    res.json({ medicine });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 module.exports = router;

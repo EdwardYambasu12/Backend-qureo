@@ -94,6 +94,8 @@ const medicineSchema = new mongoose.Schema(
       type: String,
       default: 'Free Shipping',
     },
+        storageInstructions: { type: [String], default: [] }, // array of strings
+    directions: { type: [String], default: [] }, // array of strings
   },
   { timestamps: true }
 );
