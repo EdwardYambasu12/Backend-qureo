@@ -2,6 +2,23 @@ const express = require('express');
 const router = express.Router();
 const Medicine = require('../models/Medicine');
 
+
+
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const medicine = await Medicine.findById(id);
+
+    if (!medicine) {
+      return res.status(404).json({ message: 'Medicine not found' });
+    }
+
+    res.json({ medicine });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 // ✅ Add new medicine
 router.post('/', async (req, res) => {
   try {
@@ -38,21 +55,42 @@ router.get('/category/:category', async (req, res) => {
 });
 
 // ✅ Search by name or brand
+// ✅ Enhanced search with related category results
+// ✅ Enhanced search by name, brandName, or drugClass + related by category
 router.get('/search/:query', async (req, res) => {
   try {
     const query = req.params.query;
+
+    // 1️⃣ Main search: match by name, brandName, or drugClass
     const medicines = await Medicine.find({
       $or: [
         { name: { $regex: query, $options: 'i' } },
         { brandName: { $regex: query, $options: 'i' } },
+        { drugClass: { $regex: query, $options: 'i' } },
+        {category: { $regex: query, $options: 'i' } },
       ],
     });
-    res.json({ medicines });
+
+    // 2️⃣ Related search: find similar category products
+    let related = [];
+    if (medicines.length > 0 && medicines[0].category) {
+      related = await Medicine.find({
+        category: medicines[0].category,
+        _id: { $nin: medicines.map((m) => m._id) },
+      }).limit(6);
+    }
+
+    // 3️⃣ Return both results
+    res.json({
+      results: medicines,
+      related,
+    });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Search error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 router.patch('/:id/review', async (req, res) => {
   try {
     const { newRating } = req.body; // e.g. 5, 4, 3
