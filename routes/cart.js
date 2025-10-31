@@ -1,10 +1,11 @@
+// routes/cart.js
 const express = require('express');
 const router = express.Router();
 const Cart = require('../models/Cart');
 const Medicine = require('../models/Medicine');
 const auth = require('../middleware/auth');
 
-// Get user's cart
+// ✅ Get user's cart
 router.get('/', auth, async (req, res) => {
   try {
     const cart = await Cart.findOne({ user: req.userId }).populate('items.medicine');
@@ -14,7 +15,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Add item to cart
+// ✅ Add item to cart
 router.post('/add', auth, async (req, res) => {
   try {
     const { medicineId, quantity } = req.body;
@@ -22,51 +23,57 @@ router.post('/add', auth, async (req, res) => {
     if (!medicine) return res.status(404).json({ message: 'Medicine not found' });
 
     let cart = await Cart.findOne({ user: req.userId });
+
     if (!cart) {
-      cart = new Cart({ user: req.userId, items: [], totalPrice: 0 });
+      cart = new Cart({
+        user: req.userId,
+        items: [],
+        totalPrice: 0
+      });
     }
 
     const existingItem = cart.items.find(i => i.medicine.toString() === medicineId);
+
     if (existingItem) {
       existingItem.quantity += quantity;
     } else {
-      cart.items.push({ medicine: medicineId, quantity, price: medicine.price });
+      cart.items.push({
+        medicine: medicineId,
+        quantity,
+        price: medicine.price
+      });
     }
 
     cart.totalPrice = cart.items.reduce((sum, i) => sum + i.quantity * i.price, 0);
-    await cart.save();
 
-    const populatedCart = await Cart.findById(cart._id).populate('items.medicine');
-    res.json(populatedCart);
+    await cart.save();
+    res.json(cart);
   } catch (err) {
     res.status(500).json({ message: 'Failed to add item', error: err.message });
   }
 });
 
-// Update item quantity
-// PATCH /api/cart/update
-// Body: { itemId, quantity }
-router.patch('/update', auth, async (req, res) => {
+// ✅ Update item quantity
+router.patch('/update/:itemId', auth, async (req, res) => {
   try {
-    const { itemId, quantity } = req.body;
+    const { quantity } = req.body;
     const cart = await Cart.findOne({ user: req.userId });
     if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
-    const item = cart.items.id(itemId);
+    const item = cart.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ message: 'Item not found' });
 
     item.quantity = quantity;
     cart.totalPrice = cart.items.reduce((sum, i) => sum + i.quantity * i.price, 0);
 
     await cart.save();
-    const populatedCart = await Cart.findById(cart._id).populate('items.medicine');
-    res.json(populatedCart);
+    res.json(cart);
   } catch (err) {
     res.status(500).json({ message: 'Failed to update item', error: err.message });
   }
 });
 
-// Remove item from cart
+// ✅ Remove item from cart
 router.delete('/remove/:itemId', auth, async (req, res) => {
   try {
     const cart = await Cart.findOne({ user: req.userId });
@@ -76,14 +83,13 @@ router.delete('/remove/:itemId', auth, async (req, res) => {
     cart.totalPrice = cart.items.reduce((sum, i) => sum + i.quantity * i.price, 0);
 
     await cart.save();
-    const populatedCart = await Cart.findById(cart._id).populate('items.medicine');
-    res.json(populatedCart);
+    res.json(cart);
   } catch (err) {
     res.status(500).json({ message: 'Failed to remove item', error: err.message });
   }
 });
 
-// Clear entire cart
+// ✅ Clear entire cart
 router.delete('/clear', auth, async (req, res) => {
   try {
     await Cart.findOneAndDelete({ user: req.userId });
@@ -92,5 +98,9 @@ router.delete('/clear', auth, async (req, res) => {
     res.status(500).json({ message: 'Failed to clear cart', error: err.message });
   }
 });
+
+// PATCH /api/cart/update
+// body: { itemId, quantity }
+
 
 module.exports = router;
