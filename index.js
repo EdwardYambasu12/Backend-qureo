@@ -22,7 +22,8 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   "https://qureo-dashboard.lovable.app",
-  "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com"
+  "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com",
+  "https://qureo-dashboard.vercel.app"
 ];
 
 app.use(cors({
