@@ -10,7 +10,8 @@ const assessment = require('./models/HealthAssessment');
 const profile = require('./models/Profile');
 const users = require('./models/User');
 const medicineRoutes = require('./routes/medicine');
-
+const cartRoutes = require('./routes/cart');
+const orderRoutes = require('./routes/order');
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
@@ -21,6 +22,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   "https://qureo-dashboard.lovable.app",
+  "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com"
 ];
 
 app.use(cors({
@@ -57,7 +59,8 @@ mongoose.connect(MONGO_URI, {
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/assessment', assessmentRoutes);
-
+app.use('/api/cart', cartRoutes);
+app.use('/api/orders', orderRoutes);
 app.get('/', (req, res) => res.send('Auth server is running'));
 
 // Test cookie endpoint
