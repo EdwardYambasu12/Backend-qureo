@@ -12,6 +12,7 @@ const users = require('./models/User');
 const medicineRoutes = require('./routes/medicine');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/order');
+const pharmacy = require("./routes/pharmacy")
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
@@ -23,7 +24,8 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   "https://qureo-dashboard.lovable.app",
   "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com",
-  "https://qureo-dashboard.vercel.app"
+  "https://qureo-dashboard.vercel.app",
+  "https://qureo-pharmacies.lovable.app"
 ];
 
 app.use(cors({
@@ -63,6 +65,7 @@ app.use('/api/assessment', assessmentRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.get('/', (req, res) => res.send('Auth server is running'));
+app.use("/api/pharmacy", pharmacy)
 
 // Test cookie endpoint
 app.get('/test-cookie', (req, res) => {

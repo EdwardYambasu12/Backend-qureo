@@ -6,33 +6,46 @@ const Cart = require('../models/Cart');
 const auth = require('../middleware/auth');
 
 // ✅ Create order from cart
-router.post('/', auth, async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
     const { paymentMethod } = req.body;
-    const cart = await Cart.findOne({ user: req.userId }).populate('items.medicine');
+
+    // Populate medicine + its pharmacy reference
+    const cart = await Cart.findOne({ user: req.userId })
+      .populate({
+        path: "items.medicine",
+        populate: { path: "pharmacy" },
+      });
+
     if (!cart || cart.items.length === 0)
-      return res.status(400).json({ message: 'Cart is empty' });
+      return res.status(400).json({ message: "Cart is empty" });
+
+    const pharmacyId = cart.items[0]?.medicine?.pharmacy?._id || null;
 
     const order = new Order({
       user: req.userId,
-      items: cart.items.map(i => ({
+      items: cart.items.map((i) => ({
         medicine: i.medicine._id,
         quantity: i.quantity,
-        price: i.price
+        price: i.price,
       })),
       totalPrice: cart.totalPrice,
-      pharmacy: cart.items[0]?.medicine?.pharmacy || null,
+      pharmacy: pharmacyId, // ✅ ObjectId reference
       paymentMethod,
     });
 
     await order.save();
     await Cart.findOneAndDelete({ user: req.userId });
 
-    res.json({ message: 'Order created successfully', order });
+    res.json({ message: "Order created successfully", order });
   } catch (err) {
-    res.status(500).json({ message: 'Failed to create order', error: err.message });
+    console.error(err);
+    res
+      .status(500)
+      .json({ message: "Failed to create order", error: err.message });
   }
 });
+
 
 // ✅ Get all orders for a user
 router.get('/', auth, async (req, res) => {

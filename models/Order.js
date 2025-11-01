@@ -17,7 +17,13 @@ const orderSchema = new mongoose.Schema({
     enum: ['Pending', 'Processing', 'Completed', 'Cancelled'],
     default: 'Pending'
   },
-  paymentMethod: { type: String, enum: ['Cash', 'Card', 'Mobile'], default: 'Cash' },
+  deliveryInfo: {
+  fullName: String,
+  address: String,
+  phone: String,
+},
+
+  paymentMethod: { type: String, enum: ['Cash', 'Card', 'Mobile', 'Qureo-Wallet'], default: 'Cash' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', orderSchema);
