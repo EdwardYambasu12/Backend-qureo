@@ -6,7 +6,7 @@ const Cart = require('../models/Cart');
 const auth = require('../middleware/auth');
 
 // ✅ Create order from cart
-router.post("/", auth, async (req, res) => {
+router.post("/",  async (req, res) => {
   try {
     const { paymentMethod } = req.body;
 
@@ -48,7 +48,7 @@ router.post("/", auth, async (req, res) => {
 
 
 // ✅ Get all orders for a user
-router.get('/', auth, async (req, res) => {
+router.get('/',  async (req, res) => {
   try {
     const orders = await Order.find({ user: req.userId })
       .populate('items.medicine')
@@ -60,7 +60,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ✅ Get single order
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id',  async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, user: req.userId })
       .populate('items.medicine');
