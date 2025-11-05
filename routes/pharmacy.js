@@ -4,7 +4,7 @@ const Pharmacy = require("../models/Pharmacy");
 const auth = require("../middleware/auth");
 
 // CREATE pharmacy with logo URL
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { name, email, phone, address, city, description, logo } = req.body;
     const pharmacy = new Pharmacy({ name, email, phone, address, city, description, logo });
@@ -17,7 +17,7 @@ router.post("/", auth, async (req, res) => {
 });
 
 // UPDATE pharmacy (including logo)
-router.patch("/:id", auth, async (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
     const updated = await Pharmacy.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!updated) return res.status(404).json({ message: "Pharmacy not found" });
@@ -49,7 +49,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // DELETE pharmacy
-router.delete("/:id", auth, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const deleted = await Pharmacy.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: "Pharmacy not found" });
