@@ -124,6 +124,8 @@ router.get('/related/:id', async (req, res) => {
   }
 });
 
+
+
 // ✅ Get featured products
 router.get('/featured', async (req, res) => {
   try {
@@ -159,6 +161,28 @@ router.get('/low-stock', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch low stock medicines', error: err.message });
   }
 });
+
+// ✅ Delete a medicine by ID
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deletedMedicine = await Medicine.findByIdAndDelete(id);
+
+    if (!deletedMedicine) {
+      return res.status(404).json({ message: 'Medicine not found' });
+    }
+
+    res.json({
+      message: 'Medicine deleted successfully',
+      deletedMedicine,
+    });
+  } catch (err) {
+    console.error('❌ Delete medicine error:', err);
+    res.status(500).json({ message: 'Failed to delete medicine', error: err.message });
+  }
+});
+
 
 router.get('/:id', async (req, res) => {
   try {
