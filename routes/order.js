@@ -6,7 +6,7 @@ const Cart = require('../models/Cart');
 const auth = require('../middleware/auth');
 
 // ✅ Create order from cart
-router.post("/",  async (req, res) => {
+router.post("/", auth, async (req, res) => {
   try {
     const { paymentMethod } = req.body;
 
@@ -21,12 +21,13 @@ router.post("/",  async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
 
     const pharmacyId = cart.items[0]?.medicine?.pharmacy?._id || null;
-
+    console.log("items", cart.items)
     const order = new Order({
       user: req.userId,
       items: cart.items.map((i) => ({
         medicine: i.medicine._id,
         quantity: i.quantity,
+        name : i.medicine.name,
         price: i.price,
       })),
       totalPrice: cart.totalPrice,
@@ -34,6 +35,7 @@ router.post("/",  async (req, res) => {
       paymentMethod,
     });
 
+   
     await order.save();
     await Cart.findOneAndDelete({ user: req.userId });
 
@@ -48,7 +50,7 @@ router.post("/",  async (req, res) => {
 
 
 // ✅ Get all orders for a user
-router.get('/',  async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
     const orders = await Order.find({ user: req.userId })
       .populate('items.medicine')
@@ -59,8 +61,20 @@ router.get('/',  async (req, res) => {
   }
 });
 
+// recieve orders for pharmacies 
+
+router.get("/order", async(req, res)=>{
+
+
+    const orders = await Order.find()
+
+    res.json(orders)
+
+
+})
+
 // ✅ Get single order
-router.get('/:id',  async (req, res) => {
+router.get('/:id', auth, async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, user: req.userId })
       .populate('items.medicine');

@@ -2,19 +2,99 @@ const express = require("express");
 const router = express.Router();
 const Pharmacy = require("../models/Pharmacy");
 const auth = require("../middleware/auth");
-
+const bcrypt = require("bcryptjs")
 // CREATE pharmacy with logo URL
 router.post("/", async (req, res) => {
   try {
-    const { name, email, phone, address, city, description, logo } = req.body;
-    const pharmacy = new Pharmacy({ name, email, phone, address, city, description, logo });
+    const {
+      name,
+      email,
+      phone,
+      address,
+      city,
+      description,
+      logo,
+      password,
+      confirmPassword,
+    } = req.body;
+
+    // check if pharmacy already exists
+    const existing = await Pharmacy.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ message: "Pharmacy already exists" });
+    }
+
+    // check password match
+    if (password !== confirmPassword) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
+    // create pharmacy
+    const pharmacy = new Pharmacy({
+      name,
+      email,
+      phone,
+      address,
+      city,
+      description,
+      logo,
+      password,
+      confirmPassword,
+    });
+
     await pharmacy.save();
-    res.status(201).json({ message: "Pharmacy created", pharmacy });
+
+    res.status(201).json({
+      message: "Pharmacy registered successfully",
+      pharmacy: {
+        _id: pharmacy._id,
+        name: pharmacy.name,
+        email: pharmacy.email,
+        phone: pharmacy.phone,
+        city: pharmacy.city,
+      },
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to create pharmacy", error: err.message });
+    console.error("❌ Registration error:", err);
+    res.status(500).json({ message: "Failed to register pharmacy", error: err.message });
   }
 });
+
+
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // find pharmacy
+    const pharmacy = await Pharmacy.findOne({ email }).select("+password");
+    if (!pharmacy) {
+      return res.status(404).json({ message: "Pharmacy not found" });
+    }
+
+    // check password
+    const isMatch = await bcrypt.compare(password, pharmacy.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid password" });
+    }
+
+    // success
+    res.json({
+      message: "Login successful",
+      pharmacy: {
+        id: pharmacy._id,
+        name: pharmacy.name,
+        email: pharmacy.email,
+        phone: pharmacy.phone,
+        address: pharmacy.address,
+        city: pharmacy.city,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Login error:", err);
+    res.status(500).json({ message: "Failed to login", error: err.message });
+  }
+});
+
 
 // UPDATE pharmacy (including logo)
 router.patch("/:id", async (req, res) => {

@@ -26,6 +26,8 @@ const allowedOrigins = [
   "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com",
   "https://qureo-dashboard.vercel.app",
   "https://qureo-pharmacies.lovable.app",
+  "http://192.168.1.114:8080",
+  "http://localhost:8081",
 ];
 
 app.use(cors({
