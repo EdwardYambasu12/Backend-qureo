@@ -61,6 +61,7 @@ router.post("/", async (req, res) => {
 });
 
 
+
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -138,5 +139,19 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to delete pharmacy", error: err.message });
   }
 });
+
+
+// DELETE pharmacy
+router.delete("/:id", async (req, res) => {
+  try {
+    const deleted = await Pharmacy.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: "Pharmacy not found" });
+    res.json({ message: "Pharmacy deleted" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to delete pharmacy", error: err.message });
+  }
+});
+
+
 
 module.exports = router;

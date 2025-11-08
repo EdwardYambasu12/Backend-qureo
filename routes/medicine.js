@@ -124,6 +124,21 @@ router.get('/related/:id', async (req, res) => {
   }
 });
 
+//✅Get Medicines with a specific pharmacy name
+
+router.get("/pharmacy/:id", async(req, res)=>{
+  try{
+        const {id} = req.params
+        const pharma = await Medicine.find({pharmacy : id})
+
+        res.json({pharma})
+  }
+
+  catch(err){
+    console.log(err)
+    res.status(500).json({message: "faild to fetch pharmacy produce", error : err.message})
+  }
+})
 
 
 // ✅ Get featured products
