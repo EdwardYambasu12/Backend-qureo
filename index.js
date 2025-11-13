@@ -30,6 +30,26 @@ app.use(cookieParser());
 app.use(express.json());
 
 
+const allowedOrigins = [
+  'https://qureo.vercel.app',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  "https://qureo-dashboard.lovable.app",
+  "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com",
+  "https://qureo-dashboard.vercel.app",
+  "https://qureo-pharmacies.lovable.app",
+  "http://192.168.1.116:8080",
+  "http://localhost:8081",
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','x-refresh-token'],
+}));
+
+
 
 app.use('/api/medicines', medicineRoutes); 
 app.use("/api/consultation", consultationRoutes);
@@ -62,24 +82,6 @@ app.use("/api/consultation", consultationRoutes);
 
 
 
-const allowedOrigins = [
-  'https://qureo.vercel.app',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  "https://qureo-dashboard.lovable.app",
-  "https://d44c5427-ee5e-4513-99c0-2c71e843534e.lovableproject.com",
-  "https://qureo-dashboard.vercel.app",
-  "https://qureo-pharmacies.lovable.app",
-  "http://192.168.1.116:8080",
-  "http://localhost:8081",
-];
-
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','x-refresh-token'],
-}));
 
 app.get('/', (req,res) => res.send('Auth & Signaling server running'));
 
