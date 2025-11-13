@@ -21,7 +21,7 @@ const authRoutes = require('./routes/auth');
   const pharmacy = require("./routes/pharmacy"); 
   const consultationRoutes = require("./routes/consultations");
    const dailyRoomRoutes = require("./routes/dailyRoom");
-
+  const doctor = require("./routes/doctor.js")
 const app = express();
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -52,7 +52,7 @@ app.use(cors({
 
 
 app.use('/api/medicines', medicineRoutes); 
-app.use("/api/consultation", consultationRoutes);
+app.use("/api/consultations", consultationRoutes);
  app.use('/api/auth', authRoutes);
   app.use('/api/profile', profileRoutes); 
   app.use('/api/assessment', assessmentRoutes); 
@@ -60,6 +60,7 @@ app.use("/api/consultation", consultationRoutes);
   app.use('/api/orders', orderRoutes); 
   app.use("/api/pharmacy", pharmacy); 
   app.use("/api/daily-room", dailyRoomRoutes);
+  app.use("/api/doctor", doctor)
    app.get('/', (req,res) => res.send('Auth server is running'));
 
 
