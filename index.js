@@ -7,12 +7,60 @@ const axios = require('axios');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 
+
+// Existing routes and models 
+const authRoutes = require('./routes/auth');
+ const profileRoutes = require('./routes/profile'); 
+ const assessmentRoutes = require('./routes/assessment'); 
+ const assessment = require('./models/HealthAssessment'); 
+ const profile = require('./models/Profile'); 
+ const users = require('./models/User');
+  const medicineRoutes = require('./routes/medicine'); 
+  const cartRoutes = require('./routes/cart'); 
+  const orderRoutes = require('./routes/order'); 
+  const pharmacy = require("./routes/pharmacy"); 
+  const consultationRoutes = require("./routes/consultations");
+   const dailyRoomRoutes = require("./routes/dailyRoom");
+
 const app = express();
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(cookieParser());
 app.use(express.json());
+
+
+
+app.use('/api/medicines', medicineRoutes); 
+app.use("/api/consultation", consultationRoutes);
+ app.use('/api/auth', authRoutes);
+  app.use('/api/profile', profileRoutes); 
+  app.use('/api/assessment', assessmentRoutes); 
+  app.use('/api/cart', cartRoutes); 
+  app.use('/api/orders', orderRoutes); 
+  app.use("/api/pharmacy", pharmacy); 
+  app.use("/api/daily-room", dailyRoomRoutes);
+   app.get('/', (req,res) => res.send('Auth server is running'));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 const allowedOrigins = [
   'https://qureo.vercel.app',
