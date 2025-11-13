@@ -3,21 +3,17 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
-const authRoutes = require('./routes/auth');
-const profileRoutes = require('./routes/profile');
-const assessmentRoutes = require('./routes/assessment');
-const assessment = require('./models/HealthAssessment');
-const profile = require('./models/Profile');
-const users = require('./models/User');
-const medicineRoutes = require('./routes/medicine');
-const cartRoutes = require('./routes/cart');
-const orderRoutes = require('./routes/order');
-const pharmacy = require("./routes/pharmacy")
+const axios = require('axios');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+
 const app = express();
+const server = createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
 app.use(cookieParser());
 app.use(express.json());
 
-// 🧩 1️⃣ Configure CORS for development
 const allowedOrigins = [
   'https://qureo.vercel.app',
   'http://localhost:3000',
@@ -31,110 +27,113 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: allowedOrigins,   // ✅ simpler and fully compatible with credentials
-  credentials: true,         // ✅ allow cookies
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-refresh-token'],
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','x-refresh-token'],
 }));
 
-app.use('/api/medicines', medicineRoutes);
+app.get('/', (req,res) => res.send('Auth & Signaling server running'));
 
-// 🧩 2️ Middlewares
-
-
-// Debug middleware to log requests and cookies
-if (process.env.NODE_ENV !== 'production') {
-  app.use((req, res, next) => {
-    console.log('\n🔍 Debug:', new Date().toISOString());
-    console.log('📝 Request:', req.method, req.path);
-    console.log('🍪 Cookies:', req.cookies);
-    next();
-  });
+// ------------------------
+// MongoDB connection (leave as-is)
+// ------------------------
+const MONGO_URI = "mongodb+srv://edwardsyambasu_db_user:bxhuqJ83mhFQG78K@cluster0.nwnbuqt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+if (MONGO_URI) {
+  mongoose.connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  }).then(() => console.log('✅ Connected to MongoDB'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
 }
 
-// 🧩 3️⃣ MongoDB connection
-const MONGO_URI = "mongodb+srv://edwardsyambasu_db_user:bxhuqJ83mhFQG78K@cluster0.nwnbuqt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-mongoose.connect(MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+// ------------------------
+// Helper: Fetch ICE servers from Xirsys (returns array)
+// ------------------------
+async function getXirsysIceServers() {
+  try {
+    const username = process.env.XIRSYS_USER;
+    const secret = process.env.XIRSYS_SECRET;
+    if (!username || !secret) {
+      console.warn("XIRSYS credentials not set, returning empty ICE array");
+      return [];
+    }
 
-// 🧩 4️⃣ Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/assessment', assessmentRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/orders', orderRoutes);
-app.get('/', (req, res) => res.send('Auth server is running'));
-app.use("/api/pharmacy", pharmacy)
+    const response = await axios.put(
+      "https://global.xirsys.net/_turn/MyFirstApp",
+      { format: "urls" },
+      {
+        headers: {
+          Authorization: "Basic " + Buffer.from(`${username}:${secret}`).toString("base64"),
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-// Test cookie endpoint
-app.get('/test-cookie', (req, res) => {
-  const options = {
-    httpOnly: false,
-    sameSite: 'lax',     // Less restrictive
-    secure: false,       // Allow non-HTTPS in development
-    path: '/'
-  };
-  
-  res.cookie('test_cookie', 'test_value', options);
-  res.json({ 
-    message: 'Test cookie set',
-    cookieOptions: options,
-    headers: res.getHeaders()
-  });
-});
-
-// Debug endpoint
-app.get('/debug/cookies', (req, res) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).send('Not found');
+    // response.data.v.iceServers should be an array
+    const ice = response.data?.v?.iceServers || [];
+    return ice;
+  } catch (err) {
+    console.error("❌ Failed to fetch Xirsys ICE servers:", err?.message || err);
+    return [];
   }
-  res.json({
-    cookies: req.cookies,
-    headers: {
-      origin: req.headers.origin,
-      referer: req.headers.referer,
-      host: req.headers.host
+}
+
+// ------------------------
+// Socket.IO signaling
+// ------------------------
+io.on("connection", (socket) => {
+  console.log("🧠 Socket connected:", socket.id);
+
+  // Join a WebRTC room. payload: { roomId }
+  socket.on("webrtc-join-room", async (roomId) => {
+    try {
+      socket.join(roomId);
+      console.log(`🔹 ${socket.id} joined room ${roomId}`);
+
+      // Fetch ICE servers and send them to the joining client
+      const iceServers = await getXirsysIceServers(); // array or []
+      socket.emit("ice-servers", iceServers);
+
+      // inform other participants in the room that a user joined
+      // Send the joining socket the existing peers and notify others about the join
+      const clients = io.sockets.adapter.rooms.get(roomId) || new Set();
+      for (const clientId of clients) {
+        if (clientId === socket.id) continue;
+        // notify existing peer that someone joined
+        io.to(clientId).emit("user-joined", { peerId: socket.id });
+        // inform the joining socket who is already there
+        socket.emit("user-joined", { peerId: clientId });
+      }
+    } catch (err) {
+      console.error("Error on webrtc-join-room:", err);
     }
   });
+
+  // Forward offer, answer, and ice-candidate. Clients include `to` (target socket id).
+  socket.on("webrtc-offer", ({ offer, to }) => {
+    if (!to) return;
+    io.to(to).emit("webrtc-offer", { offer, from: socket.id });
+  });
+
+  socket.on("webrtc-answer", ({ answer, to }) => {
+    if (!to) return;
+    io.to(to).emit("webrtc-answer", { answer, from: socket.id });
+  });
+
+  socket.on("webrtc-ice-candidate", ({ candidate, to }) => {
+    if (!to) return;
+    io.to(to).emit("webrtc-ice-candidate", { candidate, from: socket.id });
+  });
+
+  socket.on("disconnect", () => {
+    console.log("❌ Socket disconnected:", socket.id);
+    // notify rooms
+    socket.rooms.forEach((roomId) => {
+      socket.to(roomId).emit("user-left", { peerId: socket.id });
+    });
+  });
 });
 
-// Demo endpoints
-app.get('/all_health_assessment', async (req, res) => {
-  const all = await assessment.find({});
-  res.json(all);
-});
-
-
-app.get("/delete_health_assessments", async (req, res) => {
-  await assessment.deleteMany({});
-  res.json({ message: "All health assessments deleted" });
-});
-
-app.get("/delete_users", async (req, res) => {
-  await users.deleteMany({});
-  res.json({ message: "All health assessments deleted" });
-});
-
-app.get("/delete_profiles", async (req, res) => {
-  await profile.deleteMany({});
-  res.json({ message: "All profiles deleted" });
-}   );
-
-app.get('/all_profile', async (req, res) => {
-  const all = await profile.find({});
-  res.json(all);
-});
-
-app.get('/all_users', async (req, res) => {
-  const all = await users.find({});
-  res.json(all);
-});
-
-// 🧩 5️⃣ Start server
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Auth server listening on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`🚀 Signaling server listening on ${PORT}`));
