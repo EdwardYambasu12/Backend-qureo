@@ -4,33 +4,79 @@ const Doctor = require("../models/Doctor");
 const bcrypt = require("bcryptjs");
 
 // ✅ Register Doctor
+// ✅ Register Doctor
 router.post("/", async (req, res) => {
   try {
-    const { name, email, phone, password, specialty, experience } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      password,
+      specialty,
+      experience,
+      avatar,
+      city,
+      description,
+      certified,
+      skills,
+      languagesSpoken,
+      availability,
+      education,
+      location // optional: { latitude, longitude }
+    } = req.body;
 
+    // Check if doctor already exists
     const existing = await Doctor.findOne({ email });
     if (existing) return res.status(400).json({ message: "Doctor already exists" });
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Build new doctor object
     const newDoctor = new Doctor({
       name,
       email,
       phone,
       password: hashedPassword,
       specialty,
-      experience
+      experience,
+      avatar,
+      city,
+      description,
+      certified: certified || false,
+      skills: skills || [],
+      languagesSpoken: languagesSpoken || [],
+      availability: availability || {},
+      education: education || [],
+      location: location
+        ? { type: "Point", coordinates: [location.longitude, location.latitude] }
+        : { type: "Point", coordinates: [0, 0] }, // default coordinates
     });
 
+    // Save to database
     await newDoctor.save();
+
     res.status(201).json({ message: "Doctor registered successfully", doctor: newDoctor });
   } catch (error) {
     res.status(500).json({ message: error.message });
-  }  
+  }
 });
 
 
 
+// POST /api/doctor/bulk
+router.post("/bulk", async (req, res) => {
+    console.log("bulk")
+  try {
 
+    const doctors = req.body; // expecting an array
+    const created = await Doctor.insertMany(doctors);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to insert doctors" });
+  }
+});
 
 // ✅ UPDATE doctor location
 router.put("/:id/location", async (req, res) => {
@@ -134,6 +180,17 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+router.get('/delete', async (req, res) => {
+  try {
+    const result = await Doctor.deleteMany({});
+    console.log('Doctor collection cleared');
+    res.status(200).json({ message: 'All doctors deleted', deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error('Error deleting doctors:', error);
+    res.status(500).json({ error: 'Failed to delete doctors' });
+  }
+});
+
 
 // ✅ Delete Doctor by ID
 router.delete("/:id", async (req, res) => {
@@ -207,5 +264,7 @@ router.put("/:id/update", async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+
 
 module.exports = router;

@@ -1,23 +1,54 @@
 const mongoose = require("mongoose");
 
-const CommentSchema = new mongoose.Schema({
-  user: { type: String, required: true }, // username or user ID
-  comment: { type: String, required: true },
-  date: { type: Date, default: Date.now }
-});
-
-const DoctorSchema = new mongoose.Schema({
+const doctorSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
+  specialty: { type: String, required: true },
+  city: { type: String },
+  avatar: { type: String },
   phone: { type: String },
-  password: { type: String, required: true },
-  specialty: { type: String },
-  experience: { type: String },
+  description: { type: String },
   certified: { type: Boolean, default: false },
-  skills: [{ type: String }],
-  moreOptions: { type: Map, of: String }, // flexible key-value pairs
-  comments: [CommentSchema],
-  createdAt: { type: Date, default: Date.now }
+  skills: [String],
+  comments: [
+    {
+      user: String,
+      comment: String,
+      date: { type: Date, default: Date.now },
+    },
+  ],
+  ratings: [
+    {
+      user: String,
+      rating: Number,
+      date: { type: Date, default: Date.now },
+    },
+  ],
+  averageRating: { type: Number, default: 0 },
+
+  // New Fields
+  languagesSpoken: { type: [String], default: [] }, // e.g., ["English", "French"]
+  availability: {
+    // optional: days and time slots
+    monday: { type: [String], default: [] }, // e.g., ["09:00-12:00", "14:00-17:00"]
+    tuesday: { type: [String], default: [] },
+    wednesday: { type: [String], default: [] },
+    thursday: { type: [String], default: [] },
+    friday: { type: [String], default: [] },
+    saturday: { type: [String], default: [] },
+    sunday: { type: [String], default: [] },
+  },
+  experience: { type: Number, default: 0 }, // in years
+  education: { type: [String], default: [] }, // e.g., ["Harvard Medical School", "Residency at XYZ Hospital"]
+
+  // GeoJSON location
+  location: {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], default: [0, 0] }, // [longitude, latitude]
+  },
 });
 
-module.exports = mongoose.model("Doctor", DoctorSchema);
+// Create a 2dsphere index for geospatial queries
+doctorSchema.index({ location: '2dsphere' });
+
+module.exports = mongoose.model("Doctor", doctorSchema);
