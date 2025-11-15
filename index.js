@@ -186,5 +186,7 @@ io.on("connection", (socket) => {
   });
 });
 
+module.exports = io
+
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`🚀 Signaling server listening on ${PORT}`));
