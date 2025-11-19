@@ -130,15 +130,46 @@ io.on("connection", (socket) => {
   });
 
   // Forward offers, answers, ICE candidates
-  socket.on("webrtc-offer", ({ offer, to }) => {
-    if (!to) return;
-    io.to(to).emit("webrtc-offer", { offer, from: socket.id });
-  });
+socket.on("webrtc-offer", async ({ offer, from }) => {
+  try {
+    if (!pcRef.current) await initLocalAndPC([{ urls: "stun:stun.l.google.com:19302" }]);
+    peerIdRef.current = from;
 
-  socket.on("webrtc-answer", ({ answer, to }) => {
-    if (!to) return;
-    io.to(to).emit("webrtc-answer", { answer, from: socket.id });
-  });
+    // Only accept new offer if we're stable (not negotiating)
+    if (pcRef.current.signalingState !== "stable") {
+      console.warn("Ignoring offer: already negotiating");
+      return;
+    }
+
+    await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pcRef.current.createAnswer();
+    await pcRef.current.setLocalDescription(answer);
+    socketRef.current.emit("webrtc-answer", { answer, to: from });
+    setInCall(true);
+    await drainIceQueue();
+  } catch (err) {
+    console.error("Doctor error handling offer:", err);
+  }
+});
+
+
+socket.on("webrtc-answer", async ({ answer }) => {
+  try {
+    if (!pcRef.current) return;
+
+    // Prevent duplicate or out-of-order answers
+    if (pcRef.current.signalingState !== "have-local-offer") {
+      console.warn("Ignoring answer: PC state =", pcRef.current.signalingState);
+      return;
+    }
+
+    await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+    setInCall(true);
+  } catch (err) {
+    console.error("Doctor error handling answer:", err);
+  }
+});
+
 
   socket.on("webrtc-ice-candidate", ({ candidate, to }) => {
     if (!to) return;
