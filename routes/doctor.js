@@ -106,18 +106,22 @@ router.put("/:id/location", async (req, res) => {
 router.get("/nearby", async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
-    if (!lat || !lng) {
-      return res.status(400).json({ message: "Latitude and longitude required" });
+    // validate numeric query params
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      return res.status(400).json({ message: "Invalid latitude or longitude" });
     }
 
-    const distance = (radius ? parseFloat(radius) : 5) * 1000; // convert km to meters
+    const radiusNum = parseFloat(radius);
+    const distance = (Number.isFinite(radiusNum) ? radiusNum : 5) * 1000; // convert km to meters
 
     const doctors = await Doctor.find({
       location: {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+            coordinates: [lngNum, latNum],
           },
           $maxDistance: distance,
         },

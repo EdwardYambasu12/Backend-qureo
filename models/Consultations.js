@@ -10,6 +10,8 @@ const consultationSchema = new mongoose.Schema({
   reason: { type: String, required: true },
   roomId: { type: String, required: true, unique: true },
   status: { type: String, enum: ["scheduled", "completed", "ongoing", "cancelled"], default: "scheduled" },
+  notifiedBefore: { type: Boolean, default: false },
+  notifiedStart: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
    timezone: { type: String, default: "Africa/Liberia" },
    patientEmail : {type : String, require : true},

@@ -8,86 +8,76 @@ const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
 
-
-module.exports = (io) => {
   const router = express.Router();
-/*
-  // ------------------ Consultation Reminders ------------------
-  const sendConsultationReminders = async () => {
-    try {
-      const consultations = await Consultation.find({ status: "scheduled" });
+  // start background checker once
+  if (!global.__consultationCheckerStarted) {
+    global.__consultationCheckerStarted = true;
 
-      for (const consult of consultations) {
-        const patient = await Profile.findById(consult.patient);
-        const doctor = await Doctor.findById(consult.doctor);
+    const CHECK_INTERVAL_MS = 10 * 1000; // 10 seconds
 
-        if (!patient || !doctor) continue;
+    async function checkConsultations() {
 
-        const patientTZ = patient.timezone || "Africa/Liberia";
-        const doctorTZ = doctor.timezone || "Africa/Liberia";
+      console.log("[consultation-check] Running consultation status check...");
+      try {
+        const now = new Date();
+        // fetch scheduled consultations that are near (within next 16 minutes) or already due
+        const windowAhead = new Date(now.getTime() + 16 * 60 * 1000);
+        const candidates = await Consultation.find({ status: 'scheduled', appointmentTime: { $lte: windowAhead } });
 
-        const appointmentTimePatient = moment(consult.appointmentTime).tz(patientTZ);
-        const appointmentTimeDoctor = moment(consult.appointmentTime).tz(doctorTZ);
-        const nowPatient = moment().tz(patientTZ);
-        const nowDoctor = moment().tz(doctorTZ);
+        for (const c of candidates) {
+          const diffMs = c.appointmentTime.getTime() - now.getTime();
+          const diffMinutes = Math.floor(diffMs / 60000);
 
-        const diffPatient = appointmentTimePatient.diff(nowPatient, "minutes");
-        const diffDoctor = appointmentTimeDoctor.diff(nowDoctor, "minutes");
+          // 15 minutes before
+          if (diffMs <= 15 * 60 * 1000 && diffMs > 0 && !c.notifiedBefore) {
+            console.log(`[consultation-check] Consultation ${c._id} for patient ${c.patient} scheduled in ${diffMinutes} minutes — sending pre-start notification`);
+            // mark as notifiedBefore to avoid duplicate notifications
+            await Consultation.findByIdAndUpdate(c._id, { notifiedBefore: true, updatedAt: new Date() });
+          }
 
-        // 15-min reminders
-        if (!consult.notifiedBefore && diffPatient <= 15 && diffPatient > 0) {
-          const msgPatient = `Your consultation with Dr. ${doctor.name} is in 15 minutes.`;
-          const msgDoctor = `You have a consultation with patient ${patient.name} in 15 minutes.`;
-
-          io.to(patient._id.toString()).emit("consultationReminder", { message: msgPatient, consultation: consult });
-          io.to(doctor._id.toString()).emit("consultationReminder", { message: msgDoctor, consultation: consult });
-
-          if (patient.email) await sendEmail(patient.email, "Consultation Reminder (15 min)", msgPatient);
-          if (doctor.email) await sendEmail(doctor.email, "Consultation Reminder (15 min)", msgDoctor);
-
-          if (patient.phone) await sendSMS(patient.phone, msgPatient);
-          if (doctor.phone) await sendSMS(doctor.phone, msgDoctor);
-
-          consult.notifiedBefore = true;
-          await consult.save();
+          // time to start (or already started)
+          if (diffMs <= 0 && c.status === 'scheduled') {
+            console.log(`[consultation-check] Consultation ${c._id} is starting now. Updating status -> ongoing`);
+            await Consultation.findByIdAndUpdate(c._id, { status: 'ongoing', notifiedStart: true, updatedAt: new Date() });
+            // optionally emit socket event if io provided
+            try { if (io && io.emit) io.emit('consultation_started', { consultationId: c._id }); } catch (e) { /* ignore */ }
+          }
         }
 
-        // Start-time reminders & update status
-        if (!consult.notifiedStart && (diffPatient <= 0 || diffDoctor <= 0)) {
-          const msgPatient = `Your consultation with Dr. ${doctor.name} is starting now.`;
-          const msgDoctor = `Your consultation with patient ${patient.name} is starting now.`;
-
-          io.to(patient._id.toString()).emit("consultationReminder", { message: msgPatient, consultation: consult });
-          io.to(doctor._id.toString()).emit("consultationReminder", { message: msgDoctor, consultation: consult });
-
-          if (patient.email) await sendEmail(patient.email, "Consultation Starting Now", msgPatient);
-          if (doctor.email) await sendEmail(doctor.email, "Consultation Starting Now", msgDoctor);
-
-          if (patient.phone) await sendSMS(patient.phone, msgPatient);
-          if (doctor.phone) await sendSMS(doctor.phone, msgDoctor);
-
-          consult.status = "ongoing";
-          consult.notifiedStart = true;
-          await consult.save();
+        // COMPLETE: mark consultations as completed when now is 2 hours after appointmentTime
+        try {
+          const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+          // find consultations that are still scheduled or ongoing but are at least 2 hours past their appointmentTime
+          const toComplete = await Consultation.find({ status: { $in: ['scheduled', 'ongoing'] }, appointmentTime: { $lte: twoHoursAgo } });
+          for (const tc of toComplete) {
+            console.log(`[consultation-check] Consultation ${tc._id} appointment was at ${tc.appointmentTime}. Marking as completed.`);
+            await Consultation.findByIdAndUpdate(tc._id, { status: 'completed', updatedAt: new Date() });
+            try { if (io && io.emit) io.emit('consultation_completed', { consultationId: tc._id }); } catch (e) { /* ignore */ }
+          }
+        } catch (errComplete) {
+          console.error('[consultation-check] Error while marking consultations completed:', errComplete);
         }
+      } catch (err) {
+        console.error('[consultation-check] Error during checkConsultations:', err);
       }
-    } catch (err) {
-      console.error("Error in sendConsultationReminders:", err);
     }
-  };
 
-  // Run every 30 seconds
-  setInterval(sendConsultationReminders, 30 * 1000);
-*/
+    // run immediately then every interval
+   checkConsultations();
+    setInterval(checkConsultations, CHECK_INTERVAL_MS);
+  }
+
   // ------------------ Routes ------------------
   router.get("/", async (req, res) => {
     const result = await Consultation.find();
     res.json(result);
   });
 
+  // Create a new consultation
   router.post("/", async (req, res) => {
     try {
-      const { patient, doctor, mode, appointmentTime, reason, patientEmail, doctor_ } = req.body;
+      const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ } = req.body;
+      console.log(patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ )
       const roomId = `room-${uuidv4()}`;
 
       const consultation = await Consultation.create({
@@ -98,12 +88,14 @@ module.exports = (io) => {
         reason,
         roomId,
         patientEmail,
-        doctor_,
+        patient_,
+        doctor_
+
       });
 
       res.status(201).json(consultation);
     } catch (err) {
-      console.error(err);
+      console.log(err.message);
       res.status(500).json({ message: "Failed to create consultation", error: err.message });
     }
   });
@@ -201,9 +193,8 @@ router.delete("/:id", auth, async (req, res) => {
 
   // Add other routes as needed...
 
-  return router;
-};
+ 
 
 
-
+module.exports = router;
 
