@@ -31,6 +31,19 @@ const sendSMS = require("../utils/sms");
           // 15 minutes before
           if (diffMs <= 15 * 60 * 1000 && diffMs > 0 && !c.notifiedBefore) {
             console.log(`[consultation-check] Consultation ${c._id} for patient ${c.patient} scheduled in ${diffMinutes} minutes — sending pre-start notification`);
+            // send email reminder to patient
+             console.log("found for email")
+            try {
+              const patientEmail = c.patientEmail || (c.patient_ && c.patient_.email);
+              const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
+              const apptTime = new Date(c.appointmentTime).toLocaleString();
+              const subject = `Upcoming consultation with ${doctorName} in ${diffMinutes} minutes`;
+              const text = `Hi,\n\nThis is a reminder that your consultation with ${doctorName} is scheduled to start at ${apptTime}. Please be ready and join on time.\n\nThanks.`;
+              await sendEmail(patientEmail, subject, text);
+            } catch (errEmail) {
+              console.error('[consultation-check] Failed to send pre-start email:', errEmail);
+            }
+
             // mark as notifiedBefore to avoid duplicate notifications
             await Consultation.findByIdAndUpdate(c._id, { notifiedBefore: true, updatedAt: new Date() });
           }
@@ -38,6 +51,19 @@ const sendSMS = require("../utils/sms");
           // time to start (or already started)
           if (diffMs <= 0 && c.status === 'scheduled') {
             console.log(`[consultation-check] Consultation ${c._id} is starting now. Updating status -> ongoing`);
+            // send start email then mark ongoing
+            try {
+              console.log("found for email")
+              const patientEmail = c.patientEmail || (c.patient_ && c.patient_.email);
+              const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
+              const apptTime = new Date(c.appointmentTime).toLocaleString();
+              const subject = `Your consultation with ${doctorName} is starting now`;
+              const text = `Hi,\n\nYour consultation with ${doctorName} scheduled for ${apptTime} is starting now. Please join the session.\n\nThanks.`;
+              await sendEmail(patientEmail, subject, text);
+            } catch (errEmail) {
+              console.error('[consultation-check] Failed to send start email:', errEmail);
+            }
+
             await Consultation.findByIdAndUpdate(c._id, { status: 'ongoing', notifiedStart: true, updatedAt: new Date() });
             // optionally emit socket event if io provided
             try { if (io && io.emit) io.emit('consultation_started', { consultationId: c._id }); } catch (e) { /* ignore */ }
