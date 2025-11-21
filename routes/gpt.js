@@ -51,8 +51,9 @@ router.post('/', async (req, res) => {
     };
 
     const apiKey = process.env.DAILY_API_KEY;
+    console.log('Using OpenAI API Key:', apiKey ? 'configured' : 'NOT configured');
     if (!apiKey) return res.status(500).json({ message: 'OpenAI API key not configured on server.' });
-
+    
     const response = await axios.post('https://api.openai.com/v1/chat/completions', payload, {
       headers: {
         'Content-Type': 'application/json',
