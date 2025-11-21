@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Doctor = require("../models/Doctor");
 const bcrypt = require("bcryptjs");
+const doctorAuth = require('../middleware/doctorAuth');
 
 // ✅ Register Doctor
 // ✅ Register Doctor
@@ -37,7 +38,7 @@ router.post("/", async (req, res) => {
       name,
       email,
       phone,
-      password: hashedPassword,
+      passwordHash: hashedPassword,
       specialty,
       experience,
       avatar,
@@ -182,6 +183,15 @@ router.get("/", async (req, res) => {
     res.json(doctors);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+// Get currently authenticated doctor profile
+router.get('/me', doctorAuth, async (req, res) => {
+  try {
+    // doctorAuth attaches `req.doctor`
+    res.json(req.doctor);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch profile', error: err.message });
   }
 });
 router.get('/delete', async (req, res) => {

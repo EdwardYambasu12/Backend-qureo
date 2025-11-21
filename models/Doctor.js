@@ -41,6 +41,10 @@ const doctorSchema = new mongoose.Schema({
   experience: { type: Number, default: 0 }, // in years
   education: { type: [String], default: [] }, // e.g., ["Harvard Medical School", "Residency at XYZ Hospital"]
 
+  // Auth fields
+  passwordHash: { type: String },
+  isVerified: { type: Boolean, default: false },
+
   // GeoJSON location
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },

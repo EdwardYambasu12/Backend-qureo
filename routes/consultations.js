@@ -44,6 +44,30 @@ const sendSMS = require("../utils/sms");
               console.error('[consultation-check] Failed to send pre-start email:', errEmail);
             }
 
+            // also notify the doctor (email + SMS) if contact information available
+            try {
+              let doctorContact = c.doctor_ || null;
+              if (!doctorContact) {
+                try { doctorContact = await Doctor.findById(c.doctor).lean(); } catch (e) { doctorContact = null; }
+              }
+              const doctorEmail = doctorContact && (doctorContact.email || doctorContact.emailAddress);
+              const doctorPhone = doctorContact && (doctorContact.phone || doctorContact.mobile || doctorContact.phoneNumber);
+              const docName = doctorContact && (doctorContact.name || doctorContact.fullName) || 'Doctor';
+              if (doctorEmail) {
+                const subjectDoc = `Upcoming consultation with ${c.patient_?.name || 'a patient'} in ${diffMinutes} minutes`;
+                const textDoc = `Hi ${docName},\n\nYou have a consultation scheduled with ${c.patient_?.name || 'a patient'} at ${new Date(c.appointmentTime).toLocaleString()}. This is a ${diffMinutes}-minute reminder.\n\nThanks.`;
+                await sendEmail(doctorEmail, subjectDoc, textDoc);
+                console.log(`[consultation-check] Sent pre-start email to doctor ${doctorEmail}`);
+              }
+              if (doctorPhone) {
+                const sms = `Reminder: consultation with ${c.patient_?.name || 'a patient'} in ${diffMinutes} minutes at ${new Date(c.appointmentTime).toLocaleTimeString()}`;
+                await sendSMS(doctorPhone, sms);
+                console.log(`[consultation-check] Sent pre-start SMS to doctor ${doctorPhone}`);
+              }
+            } catch (errDocNotify) {
+              console.error('[consultation-check] Failed to notify doctor (pre-start):', errDocNotify);
+            }
+
             // mark as notifiedBefore to avoid duplicate notifications
             await Consultation.findByIdAndUpdate(c._id, { notifiedBefore: true, updatedAt: new Date() });
           }
@@ -62,6 +86,30 @@ const sendSMS = require("../utils/sms");
               await sendEmail(patientEmail, subject, text);
             } catch (errEmail) {
               console.error('[consultation-check] Failed to send start email:', errEmail);
+            }
+
+            // notify doctor at start (email + SMS)
+            try {
+              let doctorContact = c.doctor_ || null;
+              if (!doctorContact) {
+                try { doctorContact = await Doctor.findById(c.doctor).lean(); } catch (e) { doctorContact = null; }
+              }
+              const doctorEmail = doctorContact && (doctorContact.email || doctorContact.emailAddress);
+              const doctorPhone = doctorContact && (doctorContact.phone || doctorContact.mobile || doctorContact.phoneNumber);
+              const docName = doctorContact && (doctorContact.name || doctorContact.fullName) || 'Doctor';
+              if (doctorEmail) {
+                const subjectDoc = `Consultation starting now with ${c.patient_?.name || 'a patient'}`;
+                const textDoc = `Hi ${docName},\n\nYour consultation with ${c.patient_?.name || 'a patient'} scheduled for ${new Date(c.appointmentTime).toLocaleString()} is starting now. Please join the session.\n\nJoin here: https://qureo.vercel.app/call/${c.roomId}`;
+                await sendEmail(doctorEmail, subjectDoc, textDoc);
+                console.log(`[consultation-check] Sent start email to doctor ${doctorEmail}`);
+              }
+              if (doctorPhone) {
+                const sms = `Call starting: consultation with ${c.patient_?.name || 'a patient'} now — join room ${c.roomId}`;
+                await sendSMS(doctorPhone, sms);
+                console.log(`[consultation-check] Sent start SMS to doctor ${doctorPhone}`);
+              }
+            } catch (errDocNotify) {
+              console.error('[consultation-check] Failed to notify doctor (start):', errDocNotify);
             }
 
             await Consultation.findByIdAndUpdate(c._id, { status: 'ongoing', notifiedStart: true, updatedAt: new Date() });
@@ -158,13 +206,24 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Get consultations for a doctor
+// Get consultations for a doctor (by id) - existing
 router.get("/doctor/:doctorId", auth, async (req, res) => {
   try {
     const consultations = await Consultation.find({ doctor: req.params.doctorId }).sort({ appointmentTime: 1 });
     res.json(consultations);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch consultations", error: err.message });
+  }
+});
+
+// Get consultations for the authenticated doctor (protected via doctorAuth)
+const doctorAuth = require('../middleware/doctorAuth');
+router.get('/doctor', doctorAuth, async (req, res) => {
+  try {
+    const consultations = await Consultation.find({ doctor: req.doctor._id }).sort({ appointmentTime: 1 });
+    res.json(consultations);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch consultations for doctor', error: err.message });
   }
 });
 

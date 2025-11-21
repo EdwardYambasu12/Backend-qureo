@@ -20,6 +20,7 @@ const dailyRoomRoutes = require('./routes/dailyRoom');
 const doctorRoutes = require('./routes/doctor');
 const gptRoutes = require('./routes/gpt');
 const notificationTokenRoutes = require('./routes/notificationToken');
+const doctorAuthRoutes = require('./routes/doctorAuth');
 
 // -------------------- Express app --------------------
 const app = express();
@@ -58,6 +59,7 @@ app.use('/api/pharmacy', pharmacyRoutes);
 app.use('/api/consultations', consultationRoutes);
 app.use('/api/daily-room', dailyRoomRoutes);
 app.use('/api/doctor', doctorRoutes);
+app.use('/api/doctor/auth', doctorAuthRoutes);
 app.use('/api/gpt', gptRoutes);
 app.use('/api/notifications', notificationTokenRoutes);
 
