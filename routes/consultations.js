@@ -58,7 +58,7 @@ const sendSMS = require("../utils/sms");
               const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
               const apptTime = new Date(c.appointmentTime).toLocaleString();
               const subject = `Your consultation with ${doctorName} is starting now`;
-              const text = `Hi,\n\nYour consultation with ${doctorName} scheduled for ${apptTime} is starting now. Please join the session.\n\nThanks.`;
+              const text = `Hi,\n\nYour consultation with ${doctorName} scheduled for ${apptTime} is starting now. Please join the session.\n\nThanks. \n\n Join here: https://qureo.vercel.app/call/${c.roomId}`;
               await sendEmail(patientEmail, subject, text);
             } catch (errEmail) {
               console.error('[consultation-check] Failed to send start email:', errEmail);
