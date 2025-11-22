@@ -37,6 +37,7 @@ const allowedOrigins = [
   "https://qureo-dashboard.lovable.app",
   "https://qureo-dashboard.vercel.app",
   "https://qureo-pharmacies.lovable.app",
+  "https://app.qureohealth.com",
   "http://192.168.1.116:8080",
   "http://localhost:8081",
 ];
