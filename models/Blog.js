@@ -11,6 +11,10 @@ const blogSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    featured : {
+      type: Boolean,
+      default: false,
+    },
     mediaType: {
       type: String,
       enum: ["image", "video", "none"],
