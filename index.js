@@ -22,6 +22,11 @@ const gptRoutes = require('./routes/gpt');
 const notificationTokenRoutes = require('./routes/notificationToken');
 const doctorAuthRoutes = require('./routes/doctorAuth');
 const blog = require('./routes/blogRoutes');
+const labTestRoutes = require("./routes/labtest");
+const booking = require("./routes/bookinglabtest");
+
+
+
 // -------------------- Express app --------------------
 const app = express();
 const server = createServer(app);
@@ -41,6 +46,7 @@ const allowedOrigins = [
   "http://192.168.1.116:8080",
   "http://192.168.1.108:8080",
   "http://localhost:8081",
+  "http://192.168.1.112:8080"
 ];
 
 
@@ -68,7 +74,8 @@ app.use('/api/doctor/auth', doctorAuthRoutes);
 app.use('/api/gpt', gptRoutes);
 app.use('/api/notifications', notificationTokenRoutes);
 app.use("/api/blogs", blog);
-
+app.use("/api/labtests", labTestRoutes);
+app.use("/api/lab-bookings", booking);
 app.get('/', (req, res) => res.send('Auth & Signaling server running'));
 
 // -------------------- MongoDB --------------------
