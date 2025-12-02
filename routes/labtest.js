@@ -71,5 +71,19 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// DELETE a lab test by ID
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedTest = await LabTest.findByIdAndDelete(id);
+    if (!deletedTest) {
+      return res.status(404).json({ error: "Lab test not found" });
+    }
+    res.json({ success: true, message: "Lab test deleted successfully" });
+  } catch (err) {
+    console.error("LabTest delete error:", err);
+    res.status(500).json({ error: "Failed to delete lab test", details: err.message });
+  }
+});
 
 module.exports = router;
