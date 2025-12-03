@@ -42,14 +42,7 @@ const bookingSchema = new mongoose.Schema({
       name: { type: String, required: true },
       category: {
         type: String,
-        enum: [
-          "Blood Test",
-          "Urine Test",
-          "Stool Test",
-          "Imaging",
-          "DNA Test",
-          "Other",
-        ],
+        
       },
       price: { type: Number, required: true },
       sampleType: { type: String },
