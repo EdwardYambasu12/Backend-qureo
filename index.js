@@ -26,6 +26,12 @@ const labTestRoutes = require("./routes/labtest");
 const booking = require("./routes/bookinglabtest");
 const providerAuthRoutes = require("./routes/providerAuth");
 const scanned_documents = require("./routes/scannedDocument");
+const walletRoutes = require('./routes/wallet');
+const insuranceRoutes = require('./routes/insurance');
+//const providersRoutes = require('./routes/providers');
+//const benefitsRoutes = require('./routes/benefits');
+//const providerRoutes = require('./routes/provider.routes');
+//const notificationRoutes = require('./routes/notification.routes');
 
 // -------------------- Express app --------------------
 const app = express();
@@ -48,6 +54,7 @@ const allowedOrigins = [
   "http://localhost:8081",
   "http://192.168.1.112:8080",
   "http://192.168.1.112:8082",
+  "http://192.168.1.112:8080",
 
 ];
 
@@ -80,7 +87,14 @@ app.use("/api/labtests", labTestRoutes);
 app.use("/api/lab-bookings", booking);
 app.use("/api/providers", providerAuthRoutes);
 app.use("/api/upload-health-records", scanned_documents);
+app.use('/api/auth', authRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/insurance', insuranceRoutes);
+//app.use('/api/benefits', benefitsRoutes);
+//app.use('/api/providers', providerRoutes);
+//app.use('/api/notifications', notificationRoutes);
 app.get('/', (req, res) => res.send('Auth & Signaling server running'));
+
 
 // -------------------- MongoDB --------------------
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://edwardsyambasu_db_user:bxhuqJ83mhFQG78K@cluster0.nwnbuqt.mongodb.net/?retryWrites=true&w=majority";

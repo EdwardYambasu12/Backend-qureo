@@ -24,10 +24,21 @@ const blogSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    category: {
-      type: String,
-      default: "Education",
-    },
+   category: {
+  type: String,
+  enum: [
+    "Medical Basics",
+    "Women's Health",
+    "Men's Health",
+    "Mental Health",
+    "Nutrition",
+    "Lab Tests",
+    "Telemedicine",
+    "AI & Health",
+    "Education", 
+  ],
+  default: "Education",
+},
     author: {
       type: String,
       required: true,
