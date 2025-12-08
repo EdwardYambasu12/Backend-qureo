@@ -246,7 +246,7 @@ router.post('/pay-provider', async (req, res) => {
       const wallet = await Wallet.findOne({ user: userId }).session(session);
       if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
       if (wallet.balance < amount) return res.json({ message: 'Insufficient balance', success: false });
-
+      if (wallet.balance < amount) return res.status(400).json({ message: 'Insufficient balance', success: false });
       const previousBalance = wallet.balance;
       const newBalance = previousBalance - parseFloat(amount);
 
