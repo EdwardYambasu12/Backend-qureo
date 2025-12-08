@@ -4,7 +4,8 @@ const mongoose = require('mongoose');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const HealthcareProvider = require('../models/HealthcareProvider');
-
+const User = require('../models/User');
+const Profile = require('../models/Profile');
 // Get wallet balance (POST with userId in body)
 router.get("/list-of-wallets", async (req, res) => {
   try {
@@ -26,7 +27,7 @@ router.post('/balance', async (req, res) => {
     if (!wallet) {
       wallet = new Wallet({
         user: userId,
-        balance: 12.50, // Starting balance
+        balance: 0, // Starting balance
         currency: 'USD'
       });
       await wallet.save();
@@ -224,12 +225,18 @@ router.post('/withdraw', async (req, res) => {
 router.post('/pay-provider', async (req, res) => {
   try {
     const { userId, providerId, amount, serviceDetails } = req.body;
+
+
+      
+    console.log(req.body, "pay provider body");
     if (!userId) return res.status(400).json({ error: 'userId is required' });
     if (!providerId || !amount || amount <= 0) {
       return res.status(400).json({ error: 'Provider ID and valid amount required' });
     }
-
-    const provider = await HealthcareProvider.findById(providerId);
+    const user0 = await User.find()
+    console.log(user0, "all users"); 
+    const provider = await User.findById(providerId);
+    console.log(provider, "provider details");
     if (!provider) return res.status(404).json({ error: 'Provider not found' });
 
     const session = await mongoose.startSession();
@@ -237,11 +244,13 @@ router.post('/pay-provider', async (req, res) => {
 
     try {
       const wallet = await Wallet.findOne({ user: userId }).session(session);
-      if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
-      if (wallet.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+      if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
+      if (wallet.balance < amount) return res.json({ message: 'Insufficient balance', success: false });
 
       const previousBalance = wallet.balance;
       const newBalance = previousBalance - parseFloat(amount);
+
+
 
       wallet.balance = newBalance;
       wallet.lastTransaction = new Date();
@@ -257,7 +266,7 @@ router.post('/pay-provider', async (req, res) => {
         newBalance,
         status: 'completed',
         paymentMethod: 'wallet',
-        description: `Payment to ${provider.name} for ${serviceDetails || 'healthcare service'}`,
+        description: `Payment to ${provider.email} for ${serviceDetails || 'healthcare service'}`,
         reference: `PAY-${Date.now()}`,
         metadata: { serviceDetails },
         completedAt: new Date()
@@ -269,12 +278,12 @@ router.post('/pay-provider', async (req, res) => {
 
       res.json({
         success: true,
-        message: `Payment to ${provider.name} successful`,
+        message: `Payment to ${provider.email} successful`,
         newBalance,
         transactionId: transaction._id,
         provider: {
           id: provider._id,
-          name: provider.name,
+          name: provider.email,
           type: provider.type
         }
       });
