@@ -99,6 +99,84 @@ router.post('/transactions', async (req, res) => {
   }
 });
 
+
+
+//External Transfer
+router.post("/top-up", async (req, res) => {
+  console.log("being called");
+
+  const session = await Wallet.startSession();
+  session.startTransaction();
+  console.log(req.body.data, "data")
+
+  const body = req.body.data
+  try {
+    const { reciverId, amount, senderName, senderContact } = body;
+    console.log(reciverId)
+    if (!reciverId || !amount) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    let wallet = await Wallet.findOne({ user: reciverId }).session(session);
+    if (!wallet) {
+      console.log(
+      "wallet not found"
+      )
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ success: false, message: "Wallet not found" });
+    }
+
+    const previousBalance = wallet.balance;
+    const newBalance = previousBalance + parseFloat(amount);
+
+    wallet.balance = newBalance;
+    wallet.totalDeposits += parseFloat(amount);
+    wallet.lastTransaction = new Date();
+    await wallet.save({ session });
+
+    const transaction = new Transaction({
+      wallet: wallet._id,
+      user: reciverId,
+      type: "deposit",
+      amount: parseFloat(amount),
+      previousBalance,
+      newBalance,
+      status: "completed",
+      paymentMethod: "-",
+      description: `Deposit of ₦${amount} from ${senderName || "Unknown"}`,
+      reference: `DEP-${Date.now()}`,
+      completedAt: new Date(),
+    });
+    await transaction.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // ✅ Send a proper response back
+    return res.status(200).json({
+      success: true,
+      message: "Wallet top-up successful",
+      data: {
+        walletBalance: wallet.balance,
+        transactionId: transaction._id,
+      },
+    });
+  } catch (error) {
+    console.error("Top-up error:", error);
+    await session.abortTransaction();
+    session.endSession();
+
+    // ❌ Always send an error response too
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred during wallet top-up",
+      error: error.message,
+    });
+  }
+});
+
+
 // Add money to wallet
 router.post('/deposit', async (req, res) => {
   try {
@@ -220,6 +298,8 @@ router.post('/withdraw', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+
 
 // Pay provider
 router.post('/pay-provider', async (req, res) => {
