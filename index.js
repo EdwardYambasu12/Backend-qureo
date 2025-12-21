@@ -32,6 +32,7 @@ const insuranceRoutes = require('./routes/insurance');
 //const benefitsRoutes = require('./routes/benefits');
 //const providerRoutes = require('./routes/provider.routes');
 //const notificationRoutes = require('./routes/notification.routes');
+const activityRoutes = require('./routes/activityRoutes');
 
 // -------------------- Express app --------------------
 const app = express();
@@ -90,6 +91,7 @@ app.use("/api/upload-health-records", scanned_documents);
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/insurance', insuranceRoutes);
+app.use('/api/activities', activityRoutes);
 //app.use('/api/benefits', benefitsRoutes);
 //app.use('/api/providers', providerRoutes);
 //app.use('/api/notifications', notificationRoutes);
