@@ -1,0 +1,4 @@
+{"ts":"2025-12-23T14:19:51.927Z","userId":"68fcd1cba4678107afa506e3","action":{"type":"navigate","label":"Open profile","path":"/profile"}}
+{"ts":"2025-12-23T14:20:43.997Z","userId":"68fcd1cba4678107afa506e3","action":{"type":"navigate","label":"Open consultations","path":"/consultations","name":"consultations"}}
+{"ts":"2025-12-23T14:26:09.071Z","userId":"68fcd1cba4678107afa506e3","action":{"type":"navigate","label":"Open wallet","path":"/wallet"}}
+{"ts":"2025-12-23T14:27:39.381Z","userId":"68fcd1cba4678107afa506e3","action":{"type":"navigate","label":"Open pharmacy","path":"/epharmacy","name":"pharmacy"}}

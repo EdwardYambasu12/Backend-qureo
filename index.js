@@ -19,6 +19,8 @@ const consultationRoutes = require('./routes/consultations');
 const dailyRoomRoutes = require('./routes/dailyRoom');
 const doctorRoutes = require('./routes/doctor');
 const gptRoutes = require('./routes/gpt');
+const ashaRoutes = require('./routes/asha');
+const authMiddleware = require('./middleware/auth');
 const notificationTokenRoutes = require('./routes/notificationToken');
 const doctorAuthRoutes = require('./routes/doctorAuth');
 const blog = require('./routes/blogRoutes');
@@ -82,6 +84,7 @@ app.use('/api/daily-room', dailyRoomRoutes);
 app.use('/api/doctor', doctorRoutes);
 app.use('/api/doctor/auth', doctorAuthRoutes);
 app.use('/api/gpt', gptRoutes);
+app.use('/api/asha', authMiddleware, ashaRoutes);
 app.use('/api/notifications', notificationTokenRoutes);
 app.use("/api/blogs", blog);
 app.use("/api/labtests", labTestRoutes);
@@ -227,4 +230,8 @@ socket.on("webrtc-answer", async ({ answer }) => {
 
 // -------------------- Start server --------------------
 const PORT = process.env.PORT || 5001;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+}
+
+module.exports = { app, server };
