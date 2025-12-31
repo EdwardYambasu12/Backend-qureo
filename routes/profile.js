@@ -55,4 +55,24 @@ router.patch('/avatar', auth, async (req, res) => {
   }
 });
 
+// PATCH /api/profile/notifications - update notification preferences
+router.patch('/notifications', auth, async (req, res) => {
+  try {
+    const { notifications } = req.body;
+    if (!notifications || typeof notifications !== 'object') return res.status(400).json({ message: 'notifications object is required' });
+    const uid = req.userId;
+    let profile = await Profile.findOne({ user: uid });
+    if (!profile) {
+      profile = new Profile({ user: uid, notifications });
+    } else {
+      profile.notifications = { ...profile.notifications, ...notifications };
+    }
+    await profile.save();
+    res.json({ profile });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;

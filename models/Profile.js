@@ -36,6 +36,14 @@ const profileSchema = new mongoose.Schema({
     phone: { type: String },
     relation: { type: String },
   },
+
+  // notification preferences
+  notifications: {
+    reminders: { type: Boolean, default: true },
+    insights: { type: Boolean, default: false },
+    push: { type: Boolean, default: true },
+    email: { type: Boolean, default: false },
+  },
 }, { timestamps: true });
 
 // Indexes
