@@ -101,8 +101,7 @@ router.post('/chat', async (req, res) => {
 
     let parsedActions = extractActionsFromText(aiText);
     if(parsedActions){ const wrapped={actions:parsedActions}; const valid = validateActionsWrapper(wrapped); if(!valid){ console.warn('ACTIONS validation failed', validateActionsWrapper.errors); parsedActions=null; } else parsedActions = wrapped.actions; }
-    // Always clean the text of potential JSON blocks, even if parsing failed
-    aiText = aiText.replace(/```json[\s\S]*?```/gi,'').replace(/ACTIONS:\s*[\s\S]*/i,'').replace(/\{\s*"actions"\s*:\s*[\s\S]*?\}/gi,'').trim();
+    if(parsedActions) aiText = aiText.replace(/```json[\s\S]*?```/gi,'').replace(/ACTIONS:\s*[\s\S]*/i,'').trim();
 
     let finalActions=[]; const allowed = new Set(['navigate','book_appointment','seek_emergency_care','book_lab_test']);
     if(Array.isArray(parsedActions)&&parsedActions.length>0){ for(const a of parsedActions){ if(!a||typeof a!=='object') continue; if(!a.type||!allowed.has(a.type)) continue; if(a.type==='navigate'){ if(a.name&&actionMap[a.name]) finalActions.push({ type:'navigate', label:actionMap[a.name].label, path:actionMap[a.name].path, name:a.name }); else if(a.path) finalActions.push({ type:'navigate', label:a.label||'Open page', path:a.path }); } else if(a.type==='book_appointment'){ const meta=a.meta||{}; const safeMeta={}; if(meta.doctorId&&typeof meta.doctorId==='string') safeMeta.doctorId=meta.doctorId; if(Array.isArray(meta.times)) safeMeta.times=meta.times.filter(t=>typeof t==='string'); finalActions.push({ type:'book_appointment', label:a.label||'Book appointment', meta:safeMeta }); } else if(a.type==='seek_emergency_care'){ finalActions.push({ type:'seek_emergency_care', label:a.label||'Seek emergency care' }); } else if(a.type==='book_lab_test'){ finalActions.push({ type:'book_lab_test', label:a.label||'Schedule lab test' }); } } } else { finalActions = detectActions(aiText); }

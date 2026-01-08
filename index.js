@@ -58,6 +58,7 @@ const allowedOrigins = [
   "http://localhost:8081",
   "http://192.168.1.112:8080",
   "http://192.168.1.112:8082",
+  "http://192.168.205.23:8080",
   "http://192.168.1.112:8080",
 
 ];
@@ -141,8 +142,17 @@ async function getXirsysIceServers() {
   }
 }
 
+
 // -------------------- Socket.IO (WebRTC Signaling) --------------------
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { 
+  cors: { 
+    origin: allowedOrigins,
+    credentials: true 
+  } 
+});
+
+// Store active rooms
+const activeRooms = new Map();
 
 io.on("connection", (socket) => {
   console.log("🧠 Socket connected:", socket.id);
@@ -152,83 +162,109 @@ io.on("connection", (socket) => {
     try {
       socket.join(roomId);
       console.log(`🔹 ${socket.id} joined room ${roomId}`);
+      
+      // Add socket to room tracking
+      if (!activeRooms.has(roomId)) {
+        activeRooms.set(roomId, new Set());
+      }
+      activeRooms.get(roomId).add(socket.id);
 
-      // Send ICE servers
+      // Send ICE servers (TURN/STUN)
       const iceServers = await getXirsysIceServers();
+      if (iceServers.length === 0) {
+        iceServers.push({ urls: "stun:stun.l.google.com:19302" });
+      }
       socket.emit("ice-servers", iceServers);
 
-      // Notify all other users in room and inform joining socket
-      const clients = io.sockets.adapter.rooms.get(roomId) || new Set();
-      for (const clientId of clients) {
-        if (clientId === socket.id) continue;
-        io.to(clientId).emit("user-joined", { peerId: socket.id });
-        socket.emit("user-joined", { peerId: clientId });
+      // Get other users in the room
+      const roomSockets = io.sockets.adapter.rooms.get(roomId);
+      const otherUsers = Array.from(roomSockets || []).filter(id => id !== socket.id);
+
+      if (otherUsers.length > 0) {
+        // If there's already a user, notify both parties
+        const existingUser = otherUsers[0];
+        
+        // Notify existing user about new user
+        io.to(existingUser).emit("user-joined", { peerId: socket.id });
+        
+        // Notify new user about existing user
+        socket.emit("user-joined", { peerId: existingUser });
+        
+        console.log(`🔁 Room ${roomId}: ${socket.id} joining ${existingUser}`);
+      } else {
+        console.log(`👤 First user in room ${roomId}: ${socket.id}`);
       }
     } catch (err) {
       console.error("Error on webrtc-join-room:", err);
     }
   });
 
-  // Forward offers, answers, ICE candidates
-socket.on("webrtc-offer", async ({ offer, from }) => {
-  try {
-    if (!pcRef.current) await initLocalAndPC([{ urls: "stun:stun.l.google.com:19302" }]);
-    peerIdRef.current = from;
-
-    // Only accept new offer if we're stable (not negotiating)
-    if (pcRef.current.signalingState !== "stable") {
-      console.warn("Ignoring offer: already negotiating");
-      return;
+  // Forward WebRTC offer
+  socket.on("webrtc-offer", ({ offer, to }) => {
+    console.log(`📤 Offer from ${socket.id} to ${to}`);
+    if (to) {
+      io.to(to).emit("webrtc-offer", { 
+        offer, 
+        from: socket.id 
+      });
     }
+  });
 
-    await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pcRef.current.createAnswer();
-    await pcRef.current.setLocalDescription(answer);
-    socketRef.current.emit("webrtc-answer", { answer, to: from });
-    setInCall(true);
-    await drainIceQueue();
-  } catch (err) {
-    console.error("Doctor error handling offer:", err);
-  }
-});
-
-
-socket.on("webrtc-answer", async ({ answer }) => {
-  try {
-    if (!pcRef.current) return;
-
-    // Prevent duplicate or out-of-order answers
-    if (pcRef.current.signalingState !== "have-local-offer") {
-      console.warn("Ignoring answer: PC state =", pcRef.current.signalingState);
-      return;
+  // Forward WebRTC answer
+  socket.on("webrtc-answer", ({ answer, to }) => {
+    console.log(`📥 Answer from ${socket.id} to ${to}`);
+    if (to) {
+      io.to(to).emit("webrtc-answer", { 
+        answer, 
+        from: socket.id 
+      });
     }
+  });
 
-    await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-    setInCall(true);
-  } catch (err) {
-    console.error("Doctor error handling answer:", err);
-  }
-});
-
-
+  // Forward ICE candidates
   socket.on("webrtc-ice-candidate", ({ candidate, to }) => {
-    if (!to) return;
-    io.to(to).emit("webrtc-ice-candidate", { candidate, from: socket.id });
+    if (to) {
+      io.to(to).emit("webrtc-ice-candidate", { 
+        candidate, 
+        from: socket.id 
+      });
+    }
   });
 
   // Forward chat messages
   socket.on("chat-message", ({ room, message }) => {
-    io.to(room).emit("chat-message", { message, from: socket.id });
+    socket.to(room).emit("chat-message", { 
+      message, 
+      from: socket.id 
+    });
   });
 
-  // Disconnect
+  // Handle user leaving
   socket.on("disconnect", () => {
     console.log("❌ Socket disconnected:", socket.id);
-    socket.rooms.forEach((roomId) => {
-      socket.to(roomId).emit("user-left", { peerId: socket.id });
+    
+    // Remove from active rooms
+    activeRooms.forEach((sockets, roomId) => {
+      if (sockets.has(socket.id)) {
+        sockets.delete(socket.id);
+        
+        // Notify other users in the room
+        sockets.forEach(otherSocketId => {
+          io.to(otherSocketId).emit("user-left", { 
+            peerId: socket.id 
+          });
+        });
+        
+        // Clean up empty rooms
+        if (sockets.size === 0) {
+          activeRooms.delete(roomId);
+        }
+      }
     });
   });
 });
+
+
 
 // -------------------- Start server --------------------
 const PORT = process.env.PORT || 5001;

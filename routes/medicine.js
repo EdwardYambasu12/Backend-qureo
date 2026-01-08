@@ -20,13 +20,29 @@ router.post('/', async (req, res) => {
 // ✅ Get all medicines
 router.get('/', async (req, res) => {
   try {
-    const medicines = await Medicine.find().sort({ createdAt: -1 });
-    res.json({ medicines });
+    const page = parseInt(req.query.page) || 1;    // page number
+    const limit = parseInt(req.query.limit) || 20; // items per page
+    const skip = (page - 1) * limit;
+
+    const medicines = await Medicine.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Medicine.countDocuments();
+
+    res.json({
+      medicines,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+      totalItems: total,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // ✅ Get medicine by category
 router.get('/category/:category', async (req, res) => {
