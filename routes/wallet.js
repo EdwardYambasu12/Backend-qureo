@@ -313,8 +313,7 @@ router.post('/pay-provider', async (req, res) => {
     if (!providerId || !amount || amount <= 0) {
       return res.status(400).json({ error: 'Provider ID and valid amount required' });
     }
-    const user0 = await User.find()
-    console.log(user0, "all users"); 
+    
     const provider = await User.findById(providerId);
     console.log(provider, "provider details");
     if (!provider) return res.status(404).json({ error: 'Provider not found' });
