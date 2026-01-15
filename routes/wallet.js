@@ -304,7 +304,7 @@ router.post('/withdraw', async (req, res) => {
 // Pay provider
 router.post('/pay-provider', async (req, res) => {
   try {
-    const { userId, providerId, amount, serviceDetails } = req.body;
+    const { userId, providerId, amount, serviceDetails, type } = req.body;
 
 
       
@@ -340,7 +340,7 @@ router.post('/pay-provider', async (req, res) => {
         wallet: wallet._id,
         user: userId,
         provider: providerId,
-        type: 'payment',
+        type: type,
         amount: parseFloat(amount),
         previousBalance,
         newBalance,
