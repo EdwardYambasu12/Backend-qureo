@@ -346,7 +346,7 @@ router.post('/pay-provider', async (req, res) => {
         newBalance,
         status: 'completed',
         paymentMethod: 'wallet',
-        description: `Payment to ${provider.email} for ${serviceDetails || 'healthcare service'}`,
+        description: `${serviceDetails || 'healthcare service'}`,
         reference: `PAY-${Date.now()}`,
         metadata: { serviceDetails },
         completedAt: new Date()
