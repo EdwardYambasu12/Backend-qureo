@@ -7,6 +7,7 @@ const axios = require('axios');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 
+
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
@@ -30,6 +31,8 @@ const providerAuthRoutes = require("./routes/providerAuth");
 const scanned_documents = require("./routes/scannedDocument");
 const walletRoutes = require('./routes/wallet');
 const insuranceRoutes = require('./routes/insurance');
+const vision = require("./routes/scan-vision")
+const prescription = require("./routes/prescription")
 //const providersRoutes = require('./routes/providers');
 //const benefitsRoutes = require('./routes/benefits');
 //const providerRoutes = require('./routes/provider.routes');
@@ -98,6 +101,8 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/search', searchRoutes);
+app.use("/api/prescriptions", vision);
+app.use("/api/prescription", prescription)
 //app.use('/api/benefits', benefitsRoutes);
 //app.use('/api/providers', providerRoutes);
 //app.use('/api/notifications', notificationRoutes);
