@@ -207,7 +207,7 @@ router.post("/", async (req, res) => {
 });
 
 // Get consultations for a doctor (by id) - existing
-router.get("/doctor/:doctorId", auth, async (req, res) => {
+router.get("/doctor/:doctorId", async (req, res) => {
   try {
     const consultations = await Consultation.find({ doctor: req.params.doctorId }).sort({ appointmentTime: 1 });
     res.json(consultations);

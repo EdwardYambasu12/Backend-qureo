@@ -3,8 +3,8 @@ const router = express.Router();
 const Doctor = require("../models/Doctor");
 const bcrypt = require("bcryptjs");
 const doctorAuth = require('../middleware/doctorAuth');
+const jwt = require("jsonwebtoken")// ✅ Register Doctor
 
-// ✅ Register Doctor
 // ✅ Register Doctor
 router.post("/", async (req, res) => {
   try {
@@ -23,46 +23,125 @@ router.post("/", async (req, res) => {
       languagesSpoken,
       availability,
       education,
-      location // optional: { latitude, longitude }
+      location, // expected: { type: "Point", coordinates: [lng, lat] }
     } = req.body;
 
-    // Check if doctor already exists
+    // ---- Basic validation ----
+    if (!name || !email || !password || !specialty) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // ---- Check if doctor already exists ----
     const existing = await Doctor.findOne({ email });
-    if (existing) return res.status(400).json({ message: "Doctor already exists" });
+    if (existing) {
+      return res.status(400).json({ message: "Doctor already exists" });
+    }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ---- Hash password ----
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    // Build new doctor object
+    // ---- Normalize location ----
+    let normalizedLocation;
+
+    if (
+      location &&
+      location.type === "Point" &&
+      Array.isArray(location.coordinates) &&
+      location.coordinates.length === 2 &&
+      (location.coordinates[0] !== 0 || location.coordinates[1] !== 0)
+    ) {
+      normalizedLocation = {
+        type: "Point",
+        coordinates: [
+          Number(location.coordinates[0]),
+          Number(location.coordinates[1]),
+        ],
+      };
+    }
+
+    // ---- Create doctor ----
     const newDoctor = new Doctor({
       name,
       email,
       phone,
-      passwordHash: hashedPassword,
+      passwordHash,
       specialty,
       experience,
       avatar,
       city,
       description,
-      certified: certified || false,
-      skills: skills || [],
-      languagesSpoken: languagesSpoken || [],
-      availability: availability || {},
-      education: education || [],
-      location: location
-        ? { type: "Point", coordinates: [location.longitude, location.latitude] }
-        : { type: "Point", coordinates: [0, 0] }, // default coordinates
+      certified: Boolean(certified),
+      skills: skills ?? [],
+      languagesSpoken: languagesSpoken ?? [],
+      availability: availability ?? {},
+      education: education ?? [],
+      ...(normalizedLocation && { location: normalizedLocation }),
     });
 
-    // Save to database
     await newDoctor.save();
 
-    res.status(201).json({ message: "Doctor registered successfully", doctor: newDoctor });
+    // ---- Remove sensitive fields from response ----
+    const doctorResponse = newDoctor.toObject();
+    delete doctorResponse.passwordHash;
+
+    res.status(201).json({
+      message: "Doctor registered successfully",
+      doctor: doctorResponse,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // ---- Validate input ----
+    if (!email || !password) {
+      return res.status(400).json({
+        message: "Email and password are required",
+      });
+    }
+
+    // ---- Find doctor ----
+    const doctor = await Doctor.findOne({ email });
+    if (!doctor) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // ---- Compare password ----
+    const isMatch = await bcrypt.compare(password, doctor.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // ---- Clean response ----
+    const doctorResponse = doctor.toObject();
+    delete doctorResponse.passwordHash;
+
+    res.status(200).json({
+
+      message: "Login successful",
+      doctor: doctorResponse,
+    });
+
+    
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+});
 
 
 // POST /api/doctor/bulk
@@ -185,6 +264,177 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+router.get("/active", async (req, res) => {
+  try {
+    const doctors = await Doctor.find(
+      { certified: true },
+      { passwordHash: 0 } // exclude sensitive fields
+    ).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      count: doctors.length,
+      doctors,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to fetch active doctors",
+    });
+  }
+});
+router.get("/available", async (req, res) => {
+  try {
+    const {
+      specialty,
+      city,
+      skill,
+      language,
+    } = req.query;
+
+    const query = {
+      certified: true,
+      "availability.isAvailable": true,
+    };
+
+    if (specialty) {
+      query.specialty = specialty;
+    }
+
+    if (city) {
+      query.city = city;
+    }
+
+    if (skill) {
+      query.skills = { $in: [skill] };
+    }
+
+    if (language) {
+      query.languagesSpoken = { $in: [language] };
+    }
+
+    const doctors = await Doctor.find(query, {
+      passwordHash: 0,
+    });
+
+    res.status(200).json({
+      count: doctors.length,
+      doctors,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to fetch available doctors",
+    });
+  }
+});
+
+
+function getTodayKey() {
+  return new Date()
+    .toLocaleDateString("en-US", { weekday: "long" })
+    .toLowerCase();
+}
+
+router.get("/smart", async (req, res) => {
+  try {
+    const {
+      active,
+      available,
+      online,
+      recommended,
+      specialty,
+      city,
+      skill,
+      language,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const todayKey = getTodayKey();
+    const query = {};
+
+    // ---- Filters ----
+    if (active === "true") query.certified = true;
+
+    if (available === "true") {
+      query[`availability.${todayKey}`] = { $exists: true, $ne: [] };
+    }
+
+    if (online === "true") {
+      query.isOnline = true;
+      query[`availability.${todayKey}`] = { $exists: true, $ne: [] };
+    }
+
+    if (specialty) query.specialty = specialty;
+    if (city) query.city = city;
+    if (skill) query.skills = { $in: [skill] };
+    if (language) query.languagesSpoken = { $in: [language] };
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // ---- Sorting logic ----
+    const sort = {};
+
+    if (recommended === "true") {
+      sort.experience = -1; // 🔥 most experienced first
+    } else {
+      sort.createdAt = -1; // default
+    }
+
+    const [doctors, total] = await Promise.all([
+      Doctor.find(query, { passwordHash: 0 })
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit)),
+      Doctor.countDocuments(query),
+    ]);
+
+    res.status(200).json({
+      today: todayKey,
+      recommended: recommended === "true",
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      count: doctors.length,
+      doctors,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to fetch doctors",
+    });
+  }
+});
+
+
+
+router.get("/online", async (req, res) => {
+  try {
+    const todayKey = getTodayKey();
+
+    const doctors = await Doctor.find(
+      {
+        isOnline: true,
+        [`availability.${todayKey}`]: { $exists: true, $ne: [] },
+      },
+      { passwordHash: 0 }
+    ).sort({ updatedAt: -1 });
+
+    res.status(200).json({
+      today: todayKey,
+      count: doctors.length,
+      doctors,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Failed to fetch online doctors",
+    });
+  }
+});
+
+
 // Get currently authenticated doctor profile
 router.get('/me', doctorAuth, async (req, res) => {
   try {

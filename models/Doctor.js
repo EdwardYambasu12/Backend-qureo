@@ -50,6 +50,17 @@ const doctorSchema = new mongoose.Schema({
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], default: [0, 0] }, // [longitude, latitude]
   },
+
+  //online
+  isOnline: { type: Boolean, default: false },
+
+  //last seen
+
+  lastSeen: {
+  type: Date,
+},
+
+
 });
 
 // Create a 2dsphere index for geospatial queries
