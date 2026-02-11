@@ -10,6 +10,12 @@ const transactionSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   previousBalance: { type: Number, required: true },
   newBalance: { type: Number, required: true },
+  stripePaymentIntentId: {
+  type: String,
+  unique: true,
+  sparse: true
+},
+
   status: { 
     type: String, 
     enum: ['pending', 'completed', 'failed', 'cancelled'],

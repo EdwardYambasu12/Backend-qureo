@@ -6,7 +6,14 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const Stripe = require("stripe")
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+//------------------------MODELS-----------------------//
+
+
+const Transaction = require("./models/Transaction")
+const Wallet = require("./models/Wallet")
 
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
@@ -44,8 +51,102 @@ const searchRoutes = require('./routes/search');
 const app = express();
 const server = createServer(app);
 
+app.post(
+  "/api/wallet/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.log("❌ Webhook signature error:", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    console.log("✅ Webhook verified:", event.type);
+
+    // 🔥 Handle successful payment
+    if (event.type === 'payment_intent.succeeded') {
+   
+         const paymentIntent = event.data.object;
+         const userId = paymentIntent.metadata.userId;
+         const amount = paymentIntent.amount / 100;
+         console.log("payment succeed")
+         // 🔥 Prevent duplicate credits
+         const existingTransaction = await Transaction.findOne({
+           stripePaymentIntentId: paymentIntent.id
+         });
+   
+         if (existingTransaction) {
+           return res.json({ received: true });
+         }
+   
+         const session = await mongoose.startSession();
+         session.startTransaction();
+   
+         try {
+           let wallet = await Wallet.findOne({ user: userId }).session(session);
+   
+           if (!wallet) {
+             wallet = new Wallet({
+               user: userId,
+               balance: 0,
+               currency: 'USD',
+               totalDeposits: 0
+             });
+           }
+   
+           const previousBalance = wallet.balance;
+           const newBalance = previousBalance + amount;
+   
+           wallet.balance = newBalance;
+           wallet.totalDeposits += amount;
+           wallet.lastTransaction = new Date();
+           await wallet.save({ session });
+   
+           const transaction = new Transaction({
+             wallet: wallet._id,
+             user: userId,
+             type: 'deposit',
+             amount,
+             previousBalance,
+             newBalance,
+             status: 'completed',
+             paymentMethod: 'stripe',
+             stripePaymentIntentId: paymentIntent.id, // 🔐 critical
+             description: `Stripe deposit of $${amount}`,
+             reference: `STRIPE-${paymentIntent.id}`,
+             completedAt: new Date()
+           });
+   
+           await transaction.save({ session });
+   
+           await session.commitTransaction();
+           session.endSession();
+   
+         } catch (error) {
+           await session.abortTransaction();
+           session.endSession();
+           console.error(error);
+         }
+       }
+   
+       res.json({ received: true });
+
+      }
+);
+
+// Webhook route ABOVE
+
 app.use(express.json());
 app.use(cookieParser());
+
 
 // -------------------- CORS --------------------
 const allowedOrigins = [

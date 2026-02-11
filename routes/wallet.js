@@ -6,6 +6,11 @@ const Transaction = require('../models/Transaction');
 const HealthcareProvider = require('../models/HealthcareProvider');
 const User = require('../models/User');
 const Profile = require('../models/Profile');
+const Stripe = require("stripe")
+
+
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 // Get wallet balance (POST with userId in body)
 router.get("/list-of-wallets", async (req, res) => {
   try {
@@ -15,6 +20,137 @@ router.get("/list-of-wallets", async (req, res) => {
     res.status(500).json({ error: error.message });
     }   
 });
+
+/*
+
+
+router.post('/webhook',
+  express.raw({ type: 'application/json' }),
+ 
+  async (req, res) => {
+ console.log("being called")
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    console.log(sig, "sig")
+  
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+
+      );
+
+      
+    } catch (err) {
+      console.log(err.message)
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+      console.log(event, "event")
+    if (event.type === 'payment_intent.succeeded') {
+
+      const paymentIntent = event.data.object;
+      const userId = paymentIntent.metadata.userId;
+      const amount = paymentIntent.amount / 100;
+      console.log("payment succeed")
+      // 🔥 Prevent duplicate credits
+      const existingTransaction = await Transaction.findOne({
+        stripePaymentIntentId: paymentIntent.id
+      });
+
+      if (existingTransaction) {
+        return res.json({ received: true });
+      }
+
+      const session = await mongoose.startSession();
+      session.startTransaction();
+
+      try {
+        let wallet = await Wallet.findOne({ user: userId }).session(session);
+
+        if (!wallet) {
+          wallet = new Wallet({
+            user: userId,
+            balance: 0,
+            currency: 'USD',
+            totalDeposits: 0
+          });
+        }
+
+        const previousBalance = wallet.balance;
+        const newBalance = previousBalance + amount;
+
+        wallet.balance = newBalance;
+        wallet.totalDeposits += amount;
+        wallet.lastTransaction = new Date();
+        await wallet.save({ session });
+
+        const transaction = new Transaction({
+          wallet: wallet._id,
+          user: userId,
+          type: 'deposit',
+          amount,
+          previousBalance,
+          newBalance,
+          status: 'completed',
+          paymentMethod: 'stripe',
+          stripePaymentIntentId: paymentIntent.id, // 🔐 critical
+          description: `Stripe deposit of $${amount}`,
+          reference: `STRIPE-${paymentIntent.id}`,
+          completedAt: new Date()
+        });
+
+        await transaction.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+      } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error(error);
+      }
+    }
+
+    res.json({ received: true });
+});
+
+*/
+
+// JSON AFTER webhook
+router.use(express.json());
+
+/**
+ * Create PaymentIntent
+ */
+
+
+router.post("/api/create-payment-intent", async (req, res) => {
+  try {
+    const { amount, userId } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: "usd",
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        userId,
+      },
+    });
+
+    res.json({ clientSecret: paymentIntent.client_secret });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 
 router.post('/balance', async (req, res) => {
@@ -178,63 +314,30 @@ router.post("/top-up", async (req, res) => {
 
 
 // Add money to wallet
+// This should ONLY create Stripe PaymentIntent
 router.post('/deposit', async (req, res) => {
   try {
-    const { userId, amount, paymentMethod } = req.body;
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    const { userId, amount } = req.body;
+
+    if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: 'usd',
+      metadata: { userId },
+      automatic_payment_methods: { enabled: true }
+    });
 
-    try {
-      let wallet = await Wallet.findOne({ user: userId }).session(session);
+    res.json({
+      clientSecret: paymentIntent.client_secret
+    });
 
-      if (!wallet) {
-        wallet = new Wallet({ user: userId, balance: 0, currency: 'USD' });
-      }
-
-      const previousBalance = wallet.balance;
-      const newBalance = previousBalance + parseFloat(amount);
-
-      wallet.balance = newBalance;
-      wallet.totalDeposits += parseFloat(amount);
-      wallet.lastTransaction = new Date();
-      await wallet.save({ session });
-
-      const transaction = new Transaction({
-        wallet: wallet._id,
-        user: userId,
-        type: 'deposit',
-        amount: parseFloat(amount),
-        previousBalance,
-        newBalance,
-        status: 'completed',
-        paymentMethod: paymentMethod || 'wallet',
-        description: `Deposit of $${amount}`,
-        reference: `DEP-${Date.now()}`,
-        completedAt: new Date()
-      });
-      await transaction.save({ session });
-
-      await session.commitTransaction();
-      session.endSession();
-
-      res.json({
-        success: true,
-        message: 'Deposit successful',
-        newBalance,
-        transactionId: transaction._id
-      });
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      throw error;
-    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // Withdraw money
 router.post('/withdraw', async (req, res) => {
