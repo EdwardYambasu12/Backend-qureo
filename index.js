@@ -40,7 +40,7 @@ const walletRoutes = require('./routes/wallet');
 const insuranceRoutes = require('./routes/insurance');
 const vision = require("./routes/scan-vision")
 const prescription = require("./routes/prescription")
-//const providersRoutes = require('./routes/providers');
+const providersRoutes = require('./routes/providerAuth');
 //const benefitsRoutes = require('./routes/benefits');
 //const providerRoutes = require('./routes/provider.routes');
 //const notificationRoutes = require('./routes/notification.routes');
@@ -154,6 +154,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   "http://localhost:8005",
+  'http://localhost:8088',
   "https://qureo-dashboard.lovable.app",
   "https://qureo-dashboard.vercel.app",
   "https://qureo-pharmacies.lovable.app",

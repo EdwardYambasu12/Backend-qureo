@@ -7,7 +7,7 @@ const HealthcareProvider = require('../models/HealthcareProvider');
 const User = require('../models/User');
 const Profile = require('../models/Profile');
 const Stripe = require("stripe")
-
+const Provider = require("../models/Provider")
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -189,6 +189,31 @@ router.get("/all-transactions", async (req, res) => {
     res.status(500).json({ error: error.message });
     }
 });
+
+router.get("/transaction-wallet/:providerId", async (req, res) => {
+  try {
+    const { providerId } = req.params;
+
+    if (!providerId) {
+      return res.status(400).json({ error: "Provider ID is required" });
+    }
+
+    const transactions = await Transaction.find({ provider: providerId })
+      .sort({ createdAt: -1 }) // newest first
+      .populate("user", "name email") // optional
+      .populate("provider", "email type"); // optional
+
+    res.json({
+      success: true,
+      count: transactions.length,
+      transactions
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // Get transactions (POST with userId in body)
 router.post('/transactions', async (req, res) => {
@@ -409,50 +434,62 @@ router.post('/pay-provider', async (req, res) => {
   try {
     const { userId, providerId, amount, serviceDetails, type } = req.body;
 
-
-      
-    console.log(req.body, "pay provider body");
     if (!userId) return res.status(400).json({ error: 'userId is required' });
     if (!providerId || !amount || amount <= 0) {
       return res.status(400).json({ error: 'Provider ID and valid amount required' });
     }
-    
-    const provider = await User.findById(providerId);
-    console.log(provider, "provider details");
+
+    const provider = await Provider.findById(providerId);
     if (!provider) return res.status(404).json({ error: 'Provider not found' });
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
+      // 1️⃣ Get user wallet
       const wallet = await Wallet.findOne({ user: userId }).session(session);
-      if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-      if (wallet.balance < amount) return res.json({ message: 'Insufficient balance', success: false });
-      if (wallet.balance < amount) return res.status(400).json({ message: 'Insufficient balance', success: false });
+      if (!wallet) throw new Error('User wallet not found');
+
+      if (wallet.balance < amount) {
+        throw new Error('Insufficient balance');
+      }
+
       const previousBalance = wallet.balance;
       const newBalance = previousBalance - parseFloat(amount);
-
-
 
       wallet.balance = newBalance;
       wallet.lastTransaction = new Date();
       await wallet.save({ session });
 
+      // 2️⃣ Get provider wallet
+      const wallet2 = await Wallet.findOne({ user: providerId }).session(session);
+
+      if (!wallet2) throw new Error('Provider wallet not found');
+
+      const providerPreviousBalance = wallet2.balance;
+      const providerNewBalance = providerPreviousBalance + parseFloat(amount);
+
+      wallet2.balance = providerNewBalance;
+      wallet2.lastTransaction = new Date();
+      await wallet2.save({ session });
+
+      // 3️⃣ Save transaction
       const transaction = new Transaction({
         wallet: wallet._id,
         user: userId,
         provider: providerId,
-        type: type,
+        type,
         amount: parseFloat(amount),
         previousBalance,
         newBalance,
         status: 'completed',
         paymentMethod: 'wallet',
-        description: `${serviceDetails || 'healthcare service'}`,
+        description: serviceDetails || 'healthcare service',
         reference: `PAY-${Date.now()}`,
         metadata: { serviceDetails },
         completedAt: new Date()
       });
+
       await transaction.save({ session });
 
       await session.commitTransaction();
@@ -462,18 +499,15 @@ router.post('/pay-provider', async (req, res) => {
         success: true,
         message: `Payment to ${provider.email} successful`,
         newBalance,
-        transactionId: transaction._id,
-        provider: {
-          id: provider._id,
-          name: provider.email,
-          type: provider.type
-        }
+        transactionId: transaction._id
       });
+
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
-      throw error;
+      res.status(400).json({ error: error.message });
     }
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -497,5 +531,6 @@ router.post('/transactions/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 module.exports = router;
