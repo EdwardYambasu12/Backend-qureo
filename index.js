@@ -46,6 +46,13 @@ const providersRoutes = require('./routes/providerAuth');
 //const notificationRoutes = require('./routes/notification.routes');
 const activityRoutes = require('./routes/activityRoutes');
 const searchRoutes = require('./routes/search');
+const vitalsRoutes = require('./routes/vitals');
+const healthAlertsRoutes = require('./routes/healthAlerts');
+const medicationsRoutes = require('./routes/medications');
+
+// Health Monitoring Services
+const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
+const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
 const app = express();
@@ -184,6 +191,9 @@ app.use(cors({
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/assessment', assessmentRoutes);
+app.use('/api/vitals', vitalsRoutes);
+app.use('/api/health-alerts', healthAlertsRoutes);
+app.use('/api/medications', medicationsRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
@@ -219,7 +229,13 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://edwardsyambasu_db_user
 mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-}).then(() => console.log('✅ Connected to MongoDB'))
+}).then(() => {
+  console.log('✅ Connected to MongoDB');
+  
+  // Start Health Monitoring Scheduler after DB connection
+  console.log('\n🏥 Initializing Health Monitoring System...');
+  HealthMonitoringScheduler.start();
+})
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // -------------------- ICE Servers (Xirsys) --------------------

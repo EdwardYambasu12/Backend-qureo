@@ -15,3 +15,7 @@
 2026-01-08T19:05:09.005Z | ACTIONS_EMITTED: [{"type":"book_appointment","label":"Book appointment","meta":{}}]
 2026-01-08T19:05:44.433Z | ACTIONS_EMITTED: []
 2026-01-08T19:06:01.206Z | ACTIONS_EMITTED: [{"type":"navigate","label":"Open pharmacy","path":"/epharmacy","name":"pharmacy"}]
+2026-02-19T10:57:48.592Z | ACTIONS_EMITTED: []
+2026-02-19T10:57:48.934Z | ACTIONS_EMITTED: [{"type":"book_appointment","label":"Book appointment"},{"type":"seek_emergency_care","label":"Seek emergency care"}]
+2026-02-19T11:40:41.277Z | ACTIONS_EMITTED: [{"type":"book_appointment","label":"Book appointment"},{"type":"seek_emergency_care","label":"Seek emergency care"}]
+2026-02-19T11:40:41.829Z | ACTIONS_EMITTED: [{"type":"book_appointment","label":"Book appointment"}]

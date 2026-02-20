@@ -15,3 +15,7 @@
 2026-01-08T19:05:04.408Z | IP:::1 | userPreview:I want to talk to a doctor
 2026-01-08T19:05:41.761Z | IP:::1 | userPreview:ok I want to buy drugs
 2026-01-08T19:05:56.705Z | IP:::1 | userPreview:how
+2026-02-19T10:57:42.803Z | IP:::1 | userPreview:Please summarise my latest vitals: BP 140/90, HR 72 bpm, Temp 98.6°F, O2 98%.
+2026-02-19T10:57:42.859Z | IP:::1 | userPreview:Please summarise my latest vitals: BP 140/90, HR 72 bpm, Temp 98.6°F, O2 98%.
+2026-02-19T11:40:35.574Z | IP:::1 | userPreview:Please generate a quick health summary. Vitals: BP 140/90, HR 72 bpm, Temp 98.6°F, O2 98%
+2026-02-19T11:40:35.607Z | IP:::1 | userPreview:Please generate a quick health summary. Vitals: BP 140/90, HR 72 bpm, Temp 98.6°F, O2 98%
