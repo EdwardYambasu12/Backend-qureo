@@ -49,6 +49,8 @@ const searchRoutes = require('./routes/search');
 const vitalsRoutes = require('./routes/vitals');
 const healthAlertsRoutes = require('./routes/healthAlerts');
 const medicationsRoutes = require('./routes/medications');
+const medicationsManagementRoutes = require('./routes/medicationsManagement');
+const healthPlansRoutes = require('./routes/healthPlans');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
@@ -193,7 +195,9 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/assessment', assessmentRoutes);
 app.use('/api/vitals', vitalsRoutes);
 app.use('/api/health-alerts', healthAlertsRoutes);
+app.use('/api/health-plans', healthPlansRoutes);
 app.use('/api/medications', medicationsRoutes);
+app.use('/api/medications-management', medicationsManagementRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
@@ -221,6 +225,43 @@ app.use("/api/prescription", prescription)
 //app.use('/api/providers', providerRoutes);
 //app.use('/api/notifications', notificationRoutes);
 app.get('/', (req, res) => res.send('Auth & Signaling server running'));
+
+// TEST ENDPOINT: Manually trigger health monitoring (for testing)
+app.post('/api/test/trigger-health-check', async (req, res) => {
+  try {
+    console.log('🧪 Manual health check triggered via API');
+    const result = await HealthMonitoringScheduler.runManually();
+    res.json({
+      success: true,
+      message: 'Health check completed',
+      result
+    });
+  } catch (error) {
+    console.error('Error in manual health check:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to run health check',
+      error: error.message
+    });
+  }
+});
+
+// TEST ENDPOINT: Get scheduler status
+app.get('/api/test/scheduler-status', (req, res) => {
+  try {
+    const status = HealthMonitoringScheduler.getStatus();
+    res.json({
+      success: true,
+      status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 
 
 // -------------------- MongoDB --------------------
