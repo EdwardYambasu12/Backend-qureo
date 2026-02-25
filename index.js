@@ -51,6 +51,8 @@ const healthAlertsRoutes = require('./routes/healthAlerts');
 const medicationsRoutes = require('./routes/medications');
 const medicationsManagementRoutes = require('./routes/medicationsManagement');
 const healthPlansRoutes = require('./routes/healthPlans');
+const remindersRoutes = require('./routes/reminders');
+const metricsRoutes = require('./routes/metrics');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
@@ -198,6 +200,8 @@ app.use('/api/health-alerts', healthAlertsRoutes);
 app.use('/api/health-plans', healthPlansRoutes);
 app.use('/api/medications', medicationsRoutes);
 app.use('/api/medications-management', medicationsManagementRoutes);
+app.use('/api/reminders', remindersRoutes);
+app.use('/api/metrics', metricsRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
@@ -241,7 +245,7 @@ app.post('/api/test/trigger-health-check', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to run health check',
-      error: error.message
+    error: error.message
     });
   }
 });
