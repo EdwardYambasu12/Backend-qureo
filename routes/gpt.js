@@ -46,7 +46,7 @@ function generateOptions(aiResponse) {
     options = ['Yes, more symptoms', 'No, that\'s all', 'Not sure', 'Back to main'];
   } else {
     // Default fallback options
-    options = ['Yes', 'No', 'Maybe', 'Skip this'];
+    options = [];
   }
 
   return options;
