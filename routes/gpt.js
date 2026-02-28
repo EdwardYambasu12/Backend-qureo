@@ -29,60 +29,7 @@ function logSymptomCheck(entry) {
   console.log('📥 Persisting symptom check log', JSON.stringify(entry));
 }
 
-// Helper function to generate contextual options based on AI response
-function generateOptions(aiResponse) {
-  const lowerResponse = aiResponse.toLowerCase();
-  let options = [];
 
-  // Detect question type and provide appropriate options
-  if (lowerResponse.includes('severity') || lowerResponse.includes('how severe') || lowerResponse.includes('intense')) {
-    options = ['Mild', 'Moderate', 'Severe', 'Very Severe'];
-  } else if (lowerResponse.includes('duration') || lowerResponse.includes('how long') || lowerResponse.includes('for how')) {
-    options = ['Less than 24 hours', '1-3 days', '3-7 days', 'More than a week'];
-  } else if (lowerResponse.includes('when') || lowerResponse.includes('started') || lowerResponse.includes('began')) {
-    options = ['Just started', 'This morning', 'Yesterday', 'A few days ago'];
-  } else if (lowerResponse.includes('treatment') || lowerResponse.includes('medication') || lowerResponse.includes('taking')) {
-    options = ['Yes, already taking', 'No, nothing yet', 'Tried home remedies', 'Need recommendations'];
-  } else if (lowerResponse.includes('fever') || lowerResponse.includes('temperature')) {
-    options = ['I don\'t know', 'Under 38°C (100.4°F)', '38 to 39°C (100.4-102.2°F)', 'Over 39°C (102.2°F)'];
-  } else if (lowerResponse.includes('pain location') || lowerResponse.includes('where is the pain') || lowerResponse.includes('abdomen') || lowerResponse.includes('back') || lowerResponse.includes('side')) {
-    options = [
-      'Lower right abdomen',
-      'Lower left abdomen',
-      'Upper right abdomen',
-      'Upper left abdomen',
-      'Middle abdomen',
-      'All over',
-    ];
-  } else if (lowerResponse.includes('urination') || lowerResponse.includes('pee') || lowerResponse.includes('urine')) {
-    options = [
-      'Burning when urinating',
-      'Frequent urination',
-      'Blood in urine',
-      'Flank pain (side or back)',
-      'None of these',
-    ];
-  } else if (lowerResponse.includes('vaginal') || lowerResponse.includes('discharge') || lowerResponse.includes('itch') || lowerResponse.includes('smell')) {
-    options = [
-      'No discharge',
-      'White, thick, itchy',
-      'Gray, thin, fishy smell',
-      'Yellow, green, or frothy',
-      'Bloody or after sex',
-    ];
-  } else if (lowerResponse.includes('cough') || lowerResponse.includes('sore throat') || lowerResponse.includes('congestion')) {
-    options = ['Dry cough', 'Wet cough', 'Intermittent', 'Constant'];
-  } else if (lowerResponse.includes('based on your symptoms')) {
-    options = ['Get more details', 'Save this result', 'Start new assessment', 'Share result'];
-  } else if (lowerResponse.includes('other symptoms') || lowerResponse.includes('anything else')) {
-    options = ['Yes, more symptoms', 'No, that\'s all', 'Not sure', 'Back to main'];
-  } else {
-    // Default fallback options
-    options = [];
-  }
-
-  return options;
-}
 
 router.post('/', async (req, res) => {
   try {
@@ -111,23 +58,117 @@ router.post('/', async (req, res) => {
         "Ask one question at a time, and always base your next question on the user's previous answer. " +
         "CRITICAL: For every assistant reply, you MUST return a short human-readable message followed by a JSON block (marked as ```json ... ```). " +
         "The JSON must contain exactly these keys: `message` (the assistant text), `options` (array of selectable answers), and `type` ('question' or 'recommendation'). " +
+
         "Do NOT include formatted option lists in the message text when returning JSON options—just put the options in the `options` array. " +
         "When you have gathered enough information to make a recommendation, begin your response with: 'Based on your symptoms,' and include: `triage` (one of \"Emergency now\", \"Urgent today\", \"Routine, book soon\", \"Self care, monitor\"), `conditionClusters` (object with `mostConsistent`, `alsoPossible`, `lessLikely` arrays), and `actionPlan` (object with `doNow`, `avoid`, `monitor`, `escalate`, `whereToGo` keys). " +
         "Always keep replies concise. If unsure, escalate appropriately.",
     };
 
-    const payload = {
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [systemPrompt, ...messages],
-      max_tokens: 800,
-      temperature: 0.2,
-    };
+const payload = {
+  model: "gpt-4.1-mini",
 
+  input: [
+    {
+      role: "system",
+      content: systemPrompt.content
+    },
+    ...messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }))
+  ],
+
+  text: {
+    format: {
+      type: "json_schema",
+      name: "symptom_checker",
+
+     schema: {
+  type: "object",
+  additionalProperties: false,
+
+  properties: {
+    message: { type: "string" },
+
+    options: {
+      type: "array",
+      items: { type: "string" }
+    },
+
+    type: {
+      type: "string",
+      enum: ["question", "recommendation"]
+    },
+
+    triage: { type: "string" },
+
+    conditionClusters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        mostConsistent: {
+          type: "array",
+          items: { type: "string" }
+        },
+        alsoPossible: {
+          type: "array",
+          items: { type: "string" }
+        },
+        lessLikely: {
+          type: "array",
+          items: { type: "string" }
+        }
+      },
+      required: ["mostConsistent", "alsoPossible", "lessLikely"]
+    },
+
+    actionPlan: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        doNow: {
+          type: "array",
+          items: { type: "string" }
+        },
+        avoid: {
+          type: "array",
+          items: { type: "string" }
+        },
+        monitor: {
+          type: "array",
+          items: { type: "string" }
+        },
+        escalate: {
+          type: "array",
+          items: { type: "string" }
+        },
+        whereToGo: { type: "string" }
+      },
+      required: ["doNow", "avoid", "monitor", "escalate", "whereToGo"]
+    }
+  },
+
+  // 🔥 MUST include ALL property keys
+  required: [
+    "message",
+    "options",
+    "type",
+    "triage",
+    "conditionClusters",
+    "actionPlan"
+  ]
+}
+    }
+  },
+
+  temperature: 0.2,
+  max_output_tokens: 800
+};
     const apiKey = process.env.DAILY_API_KEY;
-    console.log('Using OpenAI API Key:', apiKey ? 'configured' : 'NOT configured');
+ 
     if (!apiKey) return res.status(500).json({ message: 'OpenAI API key not configured on server.', options: [] });
     
-    const response = await axios.post('https://api.openai.com/v1/chat/completions', payload, {
+    const response = await axios.post('https://api.openai.com/v1/responses', payload, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
@@ -136,10 +177,10 @@ router.post('/', async (req, res) => {
     });
 
     const data = response.data;
-    const aiReply = data?.choices?.[0]?.message?.content || 'I couldn\'t process your input, please try again.';
+    const aiReply = data?.output?.[0]?.content?.[0]?.text || 'I couldn\'t process your input, please try again.';
 
     // Logging incoming conversation for debugging
-    console.log('🤖 AI reply raw:', aiReply);
+    
 
     // Try to extract a JSON block from the model's reply. Support fenced ```json blocks or a trailing JSON object.
     let parsedOptions = [];
@@ -179,7 +220,7 @@ router.post('/', async (req, res) => {
 
     // log triage outcome when available
     if (triage) {
-      console.log('➡️ Triage outcome:', triage);
+     
       logSymptomCheck({ ip, triage });
     }
 
@@ -201,6 +242,6 @@ router.post('/', async (req, res) => {
 module.exports = router;
 
 // also export helpers for unit tests (and rateMap for cleanup)
-module.exports.generateOptions = generateOptions;
+
 module.exports.checkRateLimit = checkRateLimit;
 module.exports.rateMap = rateMap;
