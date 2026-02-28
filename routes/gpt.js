@@ -22,6 +22,13 @@ function checkRateLimit(ip) {
   return entry.count <= MAX_REQUESTS;
 }
 
+// placeholder for persistent logging (e.g. database or analytics service)
+function logSymptomCheck(entry) {
+  // entry: { ip, messages, triage, rulesFired? }
+  // TODO: replace with real DB insert or telemetry event
+  console.log('📥 Persisting symptom check log', JSON.stringify(entry));
+}
+
 // Helper function to generate contextual options based on AI response
 function generateOptions(aiResponse) {
   const lowerResponse = aiResponse.toLowerCase();
@@ -37,7 +44,32 @@ function generateOptions(aiResponse) {
   } else if (lowerResponse.includes('treatment') || lowerResponse.includes('medication') || lowerResponse.includes('taking')) {
     options = ['Yes, already taking', 'No, nothing yet', 'Tried home remedies', 'Need recommendations'];
   } else if (lowerResponse.includes('fever') || lowerResponse.includes('temperature')) {
-    options = ['Below 100.4°F', '100.4-101.5°F', '101.6-102.5°F', 'Above 102.5°F'];
+    options = ['I don\'t know', 'Under 38°C (100.4°F)', '38 to 39°C (100.4-102.2°F)', 'Over 39°C (102.2°F)'];
+  } else if (lowerResponse.includes('pain location') || lowerResponse.includes('where is the pain') || lowerResponse.includes('abdomen') || lowerResponse.includes('back') || lowerResponse.includes('side')) {
+    options = [
+      'Lower right abdomen',
+      'Lower left abdomen',
+      'Upper right abdomen',
+      'Upper left abdomen',
+      'Middle abdomen',
+      'All over',
+    ];
+  } else if (lowerResponse.includes('urination') || lowerResponse.includes('pee') || lowerResponse.includes('urine')) {
+    options = [
+      'Burning when urinating',
+      'Frequent urination',
+      'Blood in urine',
+      'Flank pain (side or back)',
+      'None of these',
+    ];
+  } else if (lowerResponse.includes('vaginal') || lowerResponse.includes('discharge') || lowerResponse.includes('itch') || lowerResponse.includes('smell')) {
+    options = [
+      'No discharge',
+      'White, thick, itchy',
+      'Gray, thin, fishy smell',
+      'Yellow, green, or frothy',
+      'Bloody or after sex',
+    ];
   } else if (lowerResponse.includes('cough') || lowerResponse.includes('sore throat') || lowerResponse.includes('congestion')) {
     options = ['Dry cough', 'Wet cough', 'Intermittent', 'Constant'];
   } else if (lowerResponse.includes('based on your symptoms')) {
@@ -64,13 +96,24 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: "Missing or invalid 'messages' array in request body.", options: [] });
     }
 
+    // log incoming conversation for audit/debugging
+    console.log('📩 New symptom-check request from', ip);
+    messages.forEach((m, idx) => {
+      console.log(`   ${idx + 1}. [${m.role}] ${m.content}`);
+    });
+    // also push record to persistent log (stub)
+    logSymptomCheck({ ip, messages });
+
     const systemPrompt = {
       role: 'system',
       content:
-        "You are a structured symptom checker. Ask one question at a time, and always base your next question on the user's previous answer. " +
-        "When you have gathered enough information, begin your final response with the phrase: 'Based on your symptoms,' followed by your analysis and recommendations also severity. " +
-        "Keep responses concise and medically relevant. If unsure, advise the user to consult a healthcare professional. " +
-        "IMPORTANT: For every assistant reply, return a short human-readable reply followed by a JSON block (marked as ```json ... ```). The JSON must contain exactly these keys: `message` (string) = the assistant's reply text, `options` (array of strings) = suggested clickable options for the user, and `type` (either 'question' or 'recommendation'). Example:\n```json\n{\n  \"message\": \"When did the pain start?\",\n  \"options\": [\"Just started\", \"This morning\", \"Yesterday\", \"A few days ago\"],\n  \"type\": \"question\"\n}\n```\nIf you cannot provide options for any reason, return an empty array for `options`. Always ensure the JSON is valid and parseable."
+        "You are a structured symptom checker. Always start by screening for serious red flags (e.g. chest pain, difficulty breathing, altered mental status, high fever, uncontrolled bleeding) before proceeding with further questions. " +
+        "Ask one question at a time, and always base your next question on the user's previous answer. " +
+        "CRITICAL: For every assistant reply, you MUST return a short human-readable message followed by a JSON block (marked as ```json ... ```). " +
+        "The JSON must contain exactly these keys: `message` (the assistant text), `options` (array of selectable answers), and `type` ('question' or 'recommendation'). " +
+        "Do NOT include formatted option lists in the message text when returning JSON options—just put the options in the `options` array. " +
+        "When you have gathered enough information to make a recommendation, begin your response with: 'Based on your symptoms,' and include: `triage` (one of \"Emergency now\", \"Urgent today\", \"Routine, book soon\", \"Self care, monitor\"), `conditionClusters` (object with `mostConsistent`, `alsoPossible`, `lessLikely` arrays), and `actionPlan` (object with `doNow`, `avoid`, `monitor`, `escalate`, `whereToGo` keys). " +
+        "Always keep replies concise. If unsure, escalate appropriately.",
     };
 
     const payload = {
@@ -95,10 +138,16 @@ router.post('/', async (req, res) => {
     const data = response.data;
     const aiReply = data?.choices?.[0]?.message?.content || 'I couldn\'t process your input, please try again.';
 
+    // Logging incoming conversation for debugging
+    console.log('🤖 AI reply raw:', aiReply);
+
     // Try to extract a JSON block from the model's reply. Support fenced ```json blocks or a trailing JSON object.
     let parsedOptions = [];
     let messageText = aiReply;
     let messageType = aiReply.toLowerCase().includes('based on your symptoms') ? 'recommendation' : 'question';
+    let triage;
+    let conditionClusters;
+    let actionPlan;
 
     try {
       const jsonFenceMatch = aiReply.match(/```json\s*([\s\S]*?)\s*```/i);
@@ -111,6 +160,13 @@ router.post('/', async (req, res) => {
           if (typeof obj.message === 'string') messageText = obj.message;
           if (Array.isArray(obj.options)) parsedOptions = obj.options;
           if (typeof obj.type === 'string') messageType = obj.type;
+          if (typeof obj.triage === 'string') triage = obj.triage;
+          if (obj.conditionClusters && typeof obj.conditionClusters === 'object') {
+            conditionClusters = obj.conditionClusters;
+          }
+          if (obj.actionPlan && typeof obj.actionPlan === 'object') {
+            actionPlan = obj.actionPlan;
+          }
         }
       } else {
         // Fallback: use heuristic generator when model didn't return JSON
@@ -121,10 +177,19 @@ router.post('/', async (req, res) => {
       parsedOptions = generateOptions(aiReply);
     }
 
+    // log triage outcome when available
+    if (triage) {
+      console.log('➡️ Triage outcome:', triage);
+      logSymptomCheck({ ip, triage });
+    }
+
     return res.json({
       message: messageText,
       options: parsedOptions,
       type: messageType,
+      triage,
+      conditionClusters,
+      actionPlan,
       raw: process.env.NODE_ENV !== 'production' ? data : undefined,
     });
   } catch (err) {
@@ -134,3 +199,8 @@ router.post('/', async (req, res) => {
 });
 
 module.exports = router;
+
+// also export helpers for unit tests (and rateMap for cleanup)
+module.exports.generateOptions = generateOptions;
+module.exports.checkRateLimit = checkRateLimit;
+module.exports.rateMap = rateMap;
