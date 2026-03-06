@@ -1,7 +1,29 @@
 const express = require('express');
 const axios = require('axios');
+const multer = require('multer');
+const openai = require('../lib/openai');
 
 const router = express.Router();
+const uploadImage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are supported for this endpoint.'));
+    }
+    cb(null, true);
+  },
+});
+
+function safeJsonParse(text) {
+  if (!text || typeof text !== 'string') return null;
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_e) {
+    return null;
+  }
+}
 
 // Simple in-memory rate limiter per IP (small projects only)
 const rateMap = new Map(); // ip -> { count, firstTs }
@@ -29,6 +51,101 @@ function logSymptomCheck(entry) {
   console.log('📥 Persisting symptom check log', JSON.stringify(entry));
 }
 
+router.post('/analyze-image', uploadImage.single('image'), async (req, res) => {
+  try {
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || 'unknown';
+    if (!checkRateLimit(ip)) {
+      return res.status(429).json({ message: 'Too many requests, slow down.', options: [] });
+    }
+
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: 'No image uploaded.', options: [] });
+    }
+
+    const { originalname, mimetype, buffer } = req.file;
+    const base64Image = buffer.toString('base64');
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a clinical image triage assistant. Analyze medical images including X-rays, skin photos, wounds, swelling, throat/eye photos, and health document screenshots. ' +
+            'Never ask user to upload again. The image is already provided. ' +
+            'Return ONLY valid JSON with keys: message, options, type, triage, conditionClusters, actionPlan. ' +
+            'Use careful language: observations, possible interpretations, and safety-focused next steps. If uncertain, say so clearly and escalate appropriately.'
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                `Analyze this uploaded image (${originalname || 'medical image'}) and explain what you see in plain language. ` +
+                'If this is an X-ray, describe visible structures and any obvious abnormal patterns. ' +
+                'If this is a skin or symptom photo, describe location/pattern/severity clues. ' +
+                'If this is a medical document screenshot, extract key findings and values. ' +
+                'Then provide urgency triage and actionable next steps.'
+            },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimetype};base64,${base64Image}` }
+            }
+          ]
+        }
+      ]
+    });
+
+    const rawContent = response?.choices?.[0]?.message?.content || '';
+    const parsed = safeJsonParse(rawContent);
+
+    if (!parsed) {
+      return res.json({
+        message: typeof rawContent === 'string' && rawContent.trim()
+          ? rawContent
+          : 'I reviewed the image but could not structure the findings. Please consult a clinician for formal interpretation.',
+        options: [
+          'What findings look concerning?',
+          'Should I seek urgent care?',
+          'Explain the image in simple terms'
+        ],
+        type: 'recommendation',
+        triage: 'Routine, book soon',
+        conditionClusters: {
+          mostConsistent: ['Image-based symptom review'],
+          alsoPossible: ['Needs clinician confirmation'],
+          lessLikely: []
+        },
+        actionPlan: {
+          doNow: ['Share this image with a licensed clinician for confirmation'],
+          avoid: ['Do not self-diagnose based only on this image'],
+          monitor: ['Track changes in pain, swelling, fever, breathing, or function'],
+          escalate: ['Go to emergency care for severe pain, breathing trouble, chest pain, neurological changes, or rapidly worsening symptoms'],
+          whereToGo: 'Primary care, urgent care, or emergency department depending on symptom severity'
+        }
+      });
+    }
+
+    return res.json({
+      message: parsed.message || 'I analyzed the image and shared findings above.',
+      options: Array.isArray(parsed.options) ? parsed.options : [],
+      type: parsed.type || 'recommendation',
+      triage: parsed.triage,
+      conditionClusters: parsed.conditionClusters,
+      actionPlan: parsed.actionPlan,
+    });
+  } catch (err) {
+    console.error('❌ /api/gpt/analyze-image error:', err?.response?.data || err.message || err);
+    return res.status(500).json({
+      message: 'Unable to analyze this image right now. Please try again.',
+      options: ['Retry', 'Start Over'],
+    });
+  }
+});
+
 
 
 router.post('/', async (req, res) => {
@@ -43,132 +160,138 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: "Missing or invalid 'messages' array in request body.", options: [] });
     }
 
+    // Check if any message contains an image
+    const hasImages = messages.some(m => m.imageUrl);
+    
     // log incoming conversation for audit/debugging
-    console.log('📩 New symptom-check request from', ip);
+    console.log('📩 New symptom-check request from', ip, hasImages ? '(with images)' : '');
     messages.forEach((m, idx) => {
-      console.log(`   ${idx + 1}. [${m.role}] ${m.content}`);
+      console.log(`   ${idx + 1}. [${m.role}] ${m.content}${m.imageUrl ? ` [IMAGE: ${m.imageUrl}]` : ''}`);
     });
     // also push record to persistent log (stub)
     logSymptomCheck({ ip, messages });
 
     const systemPrompt = {
       role: 'system',
-      content:
-        "You are a structured symptom checker. Always start by screening for serious red flags (e.g. chest pain, difficulty breathing, altered mental status, high fever, uncontrolled bleeding) before proceeding with further questions. " +
-        "Ask one question at a time, and always base your next question on the user's previous answer. " +
-        "CRITICAL: For every assistant reply, you MUST return a short human-readable message followed by a JSON block (marked as ```json ... ```). " +
-        "The JSON must contain exactly these keys: `message` (the assistant text), `options` (array of selectable answers), and `type` ('question' or 'recommendation'). " +
-
-        "Do NOT include formatted option lists in the message text when returning JSON options—just put the options in the `options` array. " +
-        "When you have gathered enough information to make a recommendation, begin your response with: 'Based on your symptoms,' and include: `triage` (one of \"Emergency now\", \"Urgent today\", \"Routine, book soon\", \"Self care, monitor\"), `conditionClusters` (object with `mostConsistent`, `alsoPossible`, `lessLikely` arrays), and `actionPlan` (object with `doNow`, `avoid`, `monitor`, `escalate`, `whereToGo` keys). " +
-        "Always keep replies concise. If unsure, escalate appropriately.",
+      content: hasImages 
+        ? "You are an expert medical image analysis assistant. CRITICAL: You MUST analyze every image provided and give detailed findings. DO NOT ask the user to upload an image again - YOU HAVE RECEIVED AN IMAGE. Analyze it now. For every medical image/document: 1) DESCRIBE exactly what you see (all visible text, numbers, findings, abnormalities), 2) IDENTIFY the type of image (lab result, X-ray, prescription, blood test, scan, etc.), 3) EXPLAIN any abnormalities in detail, 4) State what medical condition(s) this might indicate, 5) Provide urgency level and next steps. Return detailed analysis followed by JSON in ```json ... ``` with keys: message, options, type, triage, conditionClusters, actionPlan"
+        : "You are a structured symptom checker. Always start by screening for serious red flags (e.g. chest pain, difficulty breathing, altered mental status, high fever, uncontrolled bleeding) before proceeding with further questions. Ask one question at a time, and always base your next question on the user's previous answer. Return ONLY valid JSON in ```json ... ``` block with keys: message, options, type, triage, conditionClusters, actionPlan",
     };
 
-const payload = {
-  model: "gpt-4.1-mini",
+    // Format messages for API - handle both text-only and vision messages
+    const formattedMessages = messages.map(m => {
+      if (m.imageUrl) {
+        // Vision message format
+        console.log('📸 Processing image message with URL:', m.imageUrl);
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: m.content || "Please analyze this medical image in detail and explain what you see and what it indicates." },
+            { type: "image_url", image_url: { url: m.imageUrl } }
+          ]
+        };
+      } else {
+        // Text-only message format
+        return {
+          role: m.role,
+          content: m.content
+        };
+      }
+    });
 
-  input: [
+const payload = {
+  model: hasImages ? "gpt-4o" : "gpt-4-mini",  // gpt-4o has vision capabilities
+
+  messages: [
     {
       role: "system",
       content: systemPrompt.content
     },
-    ...messages.map(m => ({
-      role: m.role,
-      content: m.content
-    }))
+    ...formattedMessages
   ],
 
-  text: {
-    format: {
-      type: "json_schema",
+  response_format: {
+    type: "json_schema",
+    json_schema: {
       name: "symptom_checker",
-
-     schema: {
-  type: "object",
-  additionalProperties: false,
-
-  properties: {
-    message: { type: "string" },
-
-    options: {
-      type: "array",
-      items: { type: "string" }
-    },
-
-    type: {
-      type: "string",
-      enum: ["question", "recommendation"]
-    },
-
-    triage: { type: "string" },
-
-    conditionClusters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        mostConsistent: {
-          type: "array",
-          items: { type: "string" }
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          message: { type: "string" },
+          options: {
+            type: "array",
+            items: { type: "string" }
+          },
+          type: {
+            type: "string",
+            enum: ["question", "recommendation"]
+          },
+          triage: { type: "string" },
+          conditionClusters: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              mostConsistent: {
+                type: "array",
+                items: { type: "string" }
+              },
+              alsoPossible: {
+                type: "array",
+                items: { type: "string" }
+              },
+              lessLikely: {
+                type: "array",
+                items: { type: "string" }
+              }
+            },
+            required: ["mostConsistent", "alsoPossible", "lessLikely"]
+          },
+          actionPlan: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              doNow: {
+                type: "array",
+                items: { type: "string" }
+              },
+              avoid: {
+                type: "array",
+                items: { type: "string" }
+              },
+              monitor: {
+                type: "array",
+                items: { type: "string" }
+              },
+              escalate: {
+                type: "array",
+                items: { type: "string" }
+              },
+              whereToGo: { type: "string" }
+            },
+            required: ["doNow", "avoid", "monitor", "escalate", "whereToGo"]
+          }
         },
-        alsoPossible: {
-          type: "array",
-          items: { type: "string" }
-        },
-        lessLikely: {
-          type: "array",
-          items: { type: "string" }
-        }
-      },
-      required: ["mostConsistent", "alsoPossible", "lessLikely"]
-    },
-
-    actionPlan: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        doNow: {
-          type: "array",
-          items: { type: "string" }
-        },
-        avoid: {
-          type: "array",
-          items: { type: "string" }
-        },
-        monitor: {
-          type: "array",
-          items: { type: "string" }
-        },
-        escalate: {
-          type: "array",
-          items: { type: "string" }
-        },
-        whereToGo: { type: "string" }
-      },
-      required: ["doNow", "avoid", "monitor", "escalate", "whereToGo"]
+        required: [
+          "message",
+          "options",
+          "type",
+          "triage",
+          "conditionClusters",
+          "actionPlan"
+        ]
+      }
     }
   },
-
-  // 🔥 MUST include ALL property keys
-  required: [
-    "message",
-    "options",
-    "type",
-    "triage",
-    "conditionClusters",
-    "actionPlan"
-  ]
-}
-    }
-  },
-
-  temperature: 0.2,
-  max_output_tokens: 800
+  temperature: 0.7,
+  max_tokens: 1200
 };
     const apiKey = process.env.DAILY_API_KEY;
  
     if (!apiKey) return res.status(500).json({ message: 'OpenAI API key not configured on server.', options: [] });
     
-    const response = await axios.post('https://api.openai.com/v1/responses', payload, {
+    const response = await axios.post('https://api.openai.com/v1/chat/completions', payload, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
@@ -177,37 +300,48 @@ const payload = {
     });
 
     const data = response.data;
-    const aiReply = data?.output?.[0]?.content?.[0]?.text || 'I couldn\'t process your input, please try again.';
+    // Extract JSON from structured output (gpt-4o returns JSON directly in content)
+    const aiReply = data?.choices?.[0]?.message?.content || 'I couldn\'t process your input, please try again.';
 
-    // Logging incoming conversation for debugging
-    
+    console.log('✅ API Response received');
+    console.log('   Model used:', data?.model);
+    console.log('   Reply length:', aiReply.length, 'chars');
+    if (hasImages) console.log('   (Vision analysis) First 300 chars:', aiReply.substring(0, 300));
 
-    // Try to extract a JSON block from the model's reply. Support fenced ```json blocks or a trailing JSON object.
+    // Try to extract JSON from the model's reply
     let parsedOptions = [];
     let messageText = aiReply;
-    let messageType = aiReply.toLowerCase().includes('based on your symptoms') ? 'recommendation' : 'question';
+    let messageType = 'question';
     let triage;
     let conditionClusters;
     let actionPlan;
 
     try {
-      const jsonFenceMatch = aiReply.match(/```json\s*([\s\S]*?)\s*```/i);
-      const trailingObjectMatch = !jsonFenceMatch && aiReply.match(/(\{[\s\S]*\})\s*$/);
-      const jsonText = jsonFenceMatch ? jsonFenceMatch[1] : (trailingObjectMatch ? trailingObjectMatch[1] : null);
+      // First try to parse as direct JSON (from structured output)
+      let obj;
+      try {
+        obj = JSON.parse(aiReply);
+      } catch (e) {
+        // Fallback: try to extract JSON block from text
+        const jsonFenceMatch = aiReply.match(/```json\s*([\s\S]*?)\s*```/i);
+        const trailingObjectMatch = !jsonFenceMatch && aiReply.match(/(\{[\s\S]*\})\s*$/);
+        const jsonText = jsonFenceMatch ? jsonFenceMatch[1] : (trailingObjectMatch ? trailingObjectMatch[1] : null);
+        
+        if (jsonText) {
+          obj = JSON.parse(jsonText);
+        }
+      }
 
-      if (jsonText) {
-        const obj = JSON.parse(jsonText);
-        if (obj && typeof obj === 'object') {
-          if (typeof obj.message === 'string') messageText = obj.message;
-          if (Array.isArray(obj.options)) parsedOptions = obj.options;
-          if (typeof obj.type === 'string') messageType = obj.type;
-          if (typeof obj.triage === 'string') triage = obj.triage;
-          if (obj.conditionClusters && typeof obj.conditionClusters === 'object') {
-            conditionClusters = obj.conditionClusters;
-          }
-          if (obj.actionPlan && typeof obj.actionPlan === 'object') {
-            actionPlan = obj.actionPlan;
-          }
+      if (obj && typeof obj === 'object') {
+        if (typeof obj.message === 'string') messageText = obj.message;
+        if (Array.isArray(obj.options)) parsedOptions = obj.options;
+        if (typeof obj.type === 'string') messageType = obj.type;
+        if (typeof obj.triage === 'string') triage = obj.triage;
+        if (obj.conditionClusters && typeof obj.conditionClusters === 'object') {
+          conditionClusters = obj.conditionClusters;
+        }
+        if (obj.actionPlan && typeof obj.actionPlan === 'object') {
+          actionPlan = obj.actionPlan;
         }
       } else {
         // Fallback: use heuristic generator when model didn't return JSON
