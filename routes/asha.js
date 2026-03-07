@@ -85,6 +85,66 @@ function isSymptomConversation(messages) {
   return symptomKeywords.some((keyword) => text.includes(keyword));
 }
 
+function extractActionsAndCleanText(text) {
+  if (!text || typeof text !== 'string') {
+    return { cleanedText: text || '', parsedActions: null };
+  }
+
+  const candidates = [];
+  const codeBlockMatches = text.match(/```json\s*([\s\S]*?)```/gi) || [];
+  codeBlockMatches.forEach((block) => {
+    const stripped = block.replace(/```json/i, '').replace(/```/g, '').trim();
+    if (stripped) candidates.push(stripped);
+  });
+
+  const actionsLabelIdx = text.indexOf('ACTIONS:');
+  if (actionsLabelIdx !== -1) {
+    const trailing = text.slice(actionsLabelIdx + 'ACTIONS:'.length).trim();
+    if (trailing) candidates.push(trailing);
+  }
+
+  const firstBrace = text.indexOf('{');
+  if (firstBrace !== -1) {
+    const trailingObj = text.slice(firstBrace).trim();
+    if (trailingObj) candidates.push(trailingObj);
+  }
+
+  let parsedActions = null;
+  for (const candidate of candidates) {
+    try {
+      let jsonStr = candidate;
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (lastBrace !== -1) jsonStr = jsonStr.slice(0, lastBrace + 1);
+      const parsed = JSON.parse(jsonStr);
+
+      if (Array.isArray(parsed?.actions)) {
+        parsedActions = parsed.actions;
+        break;
+      }
+      if (Array.isArray(parsed?.ACTIONS?.actions)) {
+        parsedActions = parsed.ACTIONS.actions;
+        break;
+      }
+      if (Array.isArray(parsed?.ACTIONS)) {
+        parsedActions = parsed.ACTIONS;
+        break;
+      }
+    } catch (_e) {
+      // try next candidate
+    }
+  }
+
+  let cleanedText = text
+    .replace(/```json[\s\S]*?```/gi, '')
+    .replace(/\{\s*"ACTIONS"\s*:\s*\{[\s\S]*?\}\s*\}\s*$/i, '')
+    .replace(/ACTIONS:\s*\{[\s\S]*\}\s*$/i, '')
+    .trim();
+
+  if (!cleanedText) cleanedText = text;
+
+  return { cleanedText, parsedActions };
+}
+
 const rateMap = new Map();
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS = 40;
@@ -123,12 +183,10 @@ router.post('/chat', async (req, res) => {
     const response = await axios.post('https://api.openai.com/v1/chat/completions', payload, { headers: { 'Content-Type':'application/json', Authorization: `Bearer ${apiKey}` }, timeout: 30*1000 });
 
     const data = response.data; let aiText = data?.choices?.[0]?.message?.content || 'Sorry, I could not process that.';
-
-    function extractActionsFromText(text){ if(!text) return null; const codeBlock = text.match(/```json\s*([\s\S]*?)```/i); let jsonStr = codeBlock ? codeBlock[1] : null; if(!jsonStr){ const idx = text.indexOf('ACTIONS:'); if(idx!==-1) jsonStr = text.slice(idx+'ACTIONS:'.length).trim(); } if(!jsonStr){ const b = text.indexOf('{'); if(b!==-1) jsonStr = text.slice(b); } if(!jsonStr) return null; try{ const last = jsonStr.lastIndexOf('}'); if(last!==-1) jsonStr = jsonStr.slice(0,last+1); const parsed = JSON.parse(jsonStr); return parsed.actions||null; }catch(e){ return null; } }
-
-    let parsedActions = extractActionsFromText(aiText);
+    const extracted = extractActionsAndCleanText(aiText);
+    aiText = extracted.cleanedText;
+    let parsedActions = extracted.parsedActions;
     if(parsedActions){ const wrapped={actions:parsedActions}; const valid = validateActionsWrapper(wrapped); if(!valid){ console.warn('ACTIONS validation failed', validateActionsWrapper.errors); parsedActions=null; } else parsedActions = wrapped.actions; }
-    if(parsedActions) aiText = aiText.replace(/```json[\s\S]*?```/gi,'').replace(/ACTIONS:\s*[\s\S]*/i,'').trim();
 
     let finalActions=[]; const allowed = new Set(['navigate','book_appointment','seek_emergency_care','book_lab_test']);
     if(Array.isArray(parsedActions)&&parsedActions.length>0){ for(const a of parsedActions){ if(!a||typeof a!=='object') continue; if(!a.type||!allowed.has(a.type)) continue; if(a.type==='navigate'){ if(a.name&&actionMap[a.name]) finalActions.push({ type:'navigate', label:actionMap[a.name].label, path:actionMap[a.name].path, name:a.name }); else if(a.path) finalActions.push({ type:'navigate', label:a.label||'Open page', path:a.path }); } else if(a.type==='book_appointment'){ const meta=a.meta||{}; const safeMeta={}; if(meta.doctorId&&typeof meta.doctorId==='string') safeMeta.doctorId=meta.doctorId; if(Array.isArray(meta.times)) safeMeta.times=meta.times.filter(t=>typeof t==='string'); finalActions.push({ type:'book_appointment', label:a.label||'Book appointment', meta:safeMeta }); } else if(a.type==='seek_emergency_care'){ finalActions.push({ type:'seek_emergency_care', label:a.label||'Seek emergency care' }); } else if(a.type==='book_lab_test'){ finalActions.push({ type:'book_lab_test', label:a.label||'Schedule lab test' }); } } } else { finalActions = detectActions(aiText); }
@@ -164,8 +222,16 @@ router.post('/stream', async (req,res)=>{
     const apiKey = process.env.DAILY_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_KEY; if(!apiKey) return res.status(500).json({ message:'OpenAI API key not configured.' });
     const payload = { model: process.env.OPENAI_MODEL || 'gpt-4o-mini', messages: safeMessages, max_tokens:800, temperature:0.2 };
     const response = await axios.post('https://api.openai.com/v1/chat/completions', payload, { headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${apiKey}` }, timeout:30*1000 });
-    const aiText = response.data?.choices?.[0]?.message?.content || 'Sorry, I could not process that.';
-    const actions = detectActions(aiText);
+    const rawText = response.data?.choices?.[0]?.message?.content || 'Sorry, I could not process that.';
+    const extracted = extractActionsAndCleanText(rawText);
+    const aiText = extracted.cleanedText;
+    let actions = Array.isArray(extracted.parsedActions) ? extracted.parsedActions : [];
+    if (actions.length > 0) {
+      const wrapped = { actions };
+      const valid = validateActionsWrapper(wrapped);
+      actions = valid ? wrapped.actions : [];
+    }
+    if (actions.length === 0) actions = detectActions(aiText);
     res.setHeader('Content-Type','application/x-ndjson'); res.setHeader('Cache-Control','no-cache'); res.flushHeaders && res.flushHeaders();
     const chunkSize=80; for(let i=0;i<aiText.length;i+=chunkSize){ const piece=aiText.slice(i,i+chunkSize); res.write(JSON.stringify({ chunk: piece })+'\n'); await new Promise(r=>setTimeout(r,25)); }
     res.write(JSON.stringify({ done:true, actions })+'\n'); res.end();
