@@ -9,5 +9,7 @@ module.exports = {
   blogs: { path: '/blogs', label: 'Open blogs' },
   wallet: { path: '/health-wallet', label: 'Open wallet' },
   insurance: { path: '/insurance', label: 'Open insurance' },
-  settings: { path: '/settings', label: 'Open settings' }
+  settings: { path: '/settings', label: 'Open settings' },
+  symptom_checker: { path: '/symptom-checker', label: 'Open symptom checker' }
 };
+

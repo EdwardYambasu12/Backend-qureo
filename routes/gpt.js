@@ -200,7 +200,7 @@ router.post('/', async (req, res) => {
     });
 
 const payload = {
-  model: hasImages ? "gpt-4o" : "gpt-4-mini",  // gpt-4o has vision capabilities
+  model: hasImages ? "gpt-4o" : "gpt-4.1-mini",  // gpt-4o has vision capabilities
 
   messages: [
     {

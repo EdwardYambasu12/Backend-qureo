@@ -62,7 +62,27 @@ function detectActions(replyText) {
   if (t.includes('wallet') || t.includes('balance')) actions.push({ type: 'navigate', label: 'Open wallet', path: '/wallet' });
   if (t.includes('insurance') || t.includes('claims')) actions.push({ type: 'navigate', label: 'Open insurance', path: '/insurance' });
   if (t.includes('settings') || t.includes('preferences')) actions.push({ type: 'navigate', label: 'Open settings', path: '/settings' });
+  if (t.includes('symptom checker') || t.includes('symptom-checker')) actions.push({ type: 'navigate', label: 'Open symptom checker', path: '/symptom-checker' });
   return actions;
+}
+
+function isSymptomConversation(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return false;
+  const lastUser = [...messages].reverse().find((m) => m && m.role === 'user' && typeof m.content === 'string');
+  if (!lastUser) return false;
+  const text = (lastUser.content || '').toLowerCase();
+
+  const symptomKeywords = [
+    'symptom', 'symptoms', 'pain', 'ache', 'fever', 'cough', 'cold', 'flu', 'headache', 'migraine',
+    'sore throat', 'throat pain', 'chest pain', 'breathing', 'shortness of breath', 'wheezing',
+    'vomit', 'vomiting', 'nausea', 'diarrhea', 'constipation', 'stomach pain', 'abdominal pain',
+    'dizziness', 'faint', 'fatigue', 'weakness', 'rash', 'itching', 'swelling', 'infection',
+    'bleeding', 'high temperature', 'body pain', 'runny nose', 'sinus', 'allergy', 'allergic',
+    'bp high', 'blood pressure high', 'oxygen low', 'heart racing', 'palpitation', 'injury',
+    'xray', 'x-ray', 'scan report', 'what is wrong with me', 'diagnose me', 'diagnosis'
+  ];
+
+  return symptomKeywords.some((keyword) => text.includes(keyword));
 }
 
 const rateMap = new Map();
@@ -84,9 +104,16 @@ router.post('/chat', async (req, res) => {
     const { messages, userProfile } = req.body;
     if (!messages || !Array.isArray(messages)) return res.status(400).json({ message: "Missing 'messages' array" });
 
+    if (isSymptomConversation(messages)) {
+      return res.json({
+        reply: "I can’t analyze or diagnose symptoms here. Please use the Symptom Checker for symptom-focused assessment and next steps.",
+        actions: [{ type: 'navigate', label: 'Open Symptom Checker', path: '/symptom-checker' }],
+      });
+    }
+
     try { const logsDir = path.resolve(__dirname, '..', 'logs'); if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true }); const preview = redactText((messages.slice(-1)[0]?.content || '').slice(0,120)).replace(/\n/g,' '); fs.appendFileSync(path.join(logsDir, 'asha.log'), `${new Date().toISOString()} | IP:${ip} | userPreview:${preview}\n`); } catch (e) { console.warn('Log fail', e.message||e); }
 
-    const systemPrompt = { role: 'system', content: "You are Asha, a friendly, concise, and safety-aware health assistant for a healthcare app. Provide general advice, symptom insights, and recommended next steps. Never provide definitive diagnoses. If the user may have a medical emergency or severe symptoms, clearly advise them to seek immediate medical care. Include a short disclaimer at the end: 'This is informational and not a substitute for professional medical advice.'\n\nWhen you want the app to present actions (for example navigation, booking, or emergency guidance), append a JSON object labeled 'ACTIONS' after your text. The JSON must be valid and contain an 'actions' array. Each action should follow this schema: { \"type\": (\"navigate\"|\"book_appointment\"|\"seek_emergency_care\"|\"book_lab_test\"), \"name\": optional_short_action_name, \"path\": optional_explicit_path, \"meta\": optional_object }. Use short action names the backend can map, e.g. 'profile','cart','orders','pharmacy','consultations','lab_tests','blogs','wallet','insurance','settings'." };
+    const systemPrompt = { role: 'system', content: "You are Asha, a friendly, concise, and safety-aware healthcare app assistant. You must NOT diagnose or analyze symptoms. If a user asks about symptoms, illness, diagnosis, pain, or medical interpretation, instruct them to use the Symptom Checker and provide a navigation action to /symptom-checker. Keep responses brief and practical. Include a short disclaimer at the end: 'This is informational and not a substitute for professional medical advice.'\n\nWhen you want the app to present actions (for example navigation, booking, or emergency guidance), append a JSON object labeled 'ACTIONS' after your text. The JSON must be valid and contain an 'actions' array. Each action should follow this schema: { \"type\": (\"navigate\"|\"book_appointment\"|\"seek_emergency_care\"|\"book_lab_test\"), \"name\": optional_short_action_name, \"path\": optional_explicit_path, \"meta\": optional_object }. Use short action names the backend can map, e.g. 'profile','cart','orders','pharmacy','consultations','lab_tests','blogs','wallet','insurance','settings','symptom_checker'." };
     const profilePrompt = userProfile ? { role: 'system', content: `User profile: ${JSON.stringify(userProfile)}. Use this info to personalize, but do not reveal private identifiers.` } : null;
     const safeMessages = (profilePrompt ? [systemPrompt, profilePrompt, ...messages] : [systemPrompt, ...messages]).map(m=>({ role: m.role, content: redactText(m.content) }));
 
@@ -117,7 +144,21 @@ router.post('/stream', async (req,res)=>{
     const ip = req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress || 'unknown';
     if(!checkRateLimit(ip)) return res.status(429).json({ message:'Too many requests' });
     const { messages, userProfile } = req.body; if(!messages||!Array.isArray(messages)) return res.status(400).json({ message:"Missing 'messages' array" });
-    const systemPrompt = { role:'system', content: "You are Asha, a friendly, concise, and safety-aware health assistant for a healthcare app. Provide general advice..." };
+
+    if (isSymptomConversation(messages)) {
+      const redirectText = "I can’t analyze or diagnose symptoms here. Please use the Symptom Checker for symptom-focused assessment and next steps.";
+      const actions = [{ type: 'navigate', label: 'Open Symptom Checker', path: '/symptom-checker' }];
+      res.setHeader('Content-Type','application/x-ndjson'); res.setHeader('Cache-Control','no-cache'); res.flushHeaders && res.flushHeaders();
+      const chunkSize = 80;
+      for (let i = 0; i < redirectText.length; i += chunkSize) {
+        const piece = redirectText.slice(i, i + chunkSize);
+        res.write(JSON.stringify({ chunk: piece }) + '\n');
+      }
+      res.write(JSON.stringify({ done: true, actions }) + '\n');
+      return res.end();
+    }
+
+    const systemPrompt = { role:'system', content: "You are Asha, a friendly, concise, and safety-aware healthcare app assistant. Do NOT diagnose or analyze symptoms. For any symptom-related request, direct user to Symptom Checker and include a navigate action to /symptom-checker." };
     const profilePrompt = userProfile ? { role:'system', content:`User profile: ${JSON.stringify(userProfile)}. Use this info to personalize, but do not reveal private identifiers.` } : null;
     const safeMessages = (profilePrompt ? [systemPrompt, profilePrompt, ...messages] : [systemPrompt, ...messages]).map(m=>({ role:m.role, content:redactText(m.content) }));
     const apiKey = process.env.DAILY_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_KEY; if(!apiKey) return res.status(500).json({ message:'OpenAI API key not configured.' });
