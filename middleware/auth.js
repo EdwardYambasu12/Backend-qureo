@@ -4,8 +4,9 @@ const User = require('../models/User');
 
 module.exports = async function authMiddleware(req, res, next) {
   try {
-    // Dev override: disable auth checks in development or when DISABLE_AUTH=true
-    if (process.env.DISABLE_AUTH === 'true' || process.env.NODE_ENV !== 'production') {
+    // Dev override: disable auth checks only when explicitly enabled.
+    // Using NODE_ENV alone makes every dev request impersonate one shared user.
+    if (process.env.DISABLE_AUTH === 'true') {
       const devEmail = process.env.DEV_USER_EMAIL || 'dev@local';
       let user = await User.findOne({ email: devEmail });
       if (!user) {
