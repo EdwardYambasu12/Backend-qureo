@@ -53,6 +53,7 @@ const medicationsManagementRoutes = require('./routes/medicationsManagement');
 const healthPlansRoutes = require('./routes/healthPlans');
 const remindersRoutes = require('./routes/reminders');
 const metricsRoutes = require('./routes/metrics');
+const referralRoutes = require('./routes/referrals');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
@@ -202,6 +203,7 @@ app.use('/api/medications', medicationsRoutes);
 app.use('/api/medications-management', medicationsManagementRoutes);
 app.use('/api/reminders', remindersRoutes);
 app.use('/api/metrics', metricsRoutes);
+app.use('/api/referrals', referralRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
