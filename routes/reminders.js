@@ -3,6 +3,7 @@ const router = express.Router();
 const Medication = require('../models/Medication');
 const HealthAlert = require('../models/HealthAlert');
 const Vitals = require('../models/Vitals');
+const Profile = require('../models/Profile');
 const auth = require('../middleware/auth');
 
 /**
@@ -14,6 +15,16 @@ const auth = require('../middleware/auth');
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const profile = await Profile.findOne({ user: userId }).select('notifications').lean();
+    const remindersEnabled = profile?.notifications?.reminders !== false;
+    if (!remindersEnabled) {
+      return res.json({
+        success: true,
+        reminders: [],
+        count: 0,
+        metadata: { medicationReminders: 0, alertReminders: 0 },
+      });
+    }
     const reminders = [];
 
     // 1. Get active medications with scheduled times
@@ -122,6 +133,11 @@ router.get('/', auth, async (req, res) => {
 router.get('/upcoming', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const profile = await Profile.findOne({ user: userId }).select('notifications').lean();
+    const remindersEnabled = profile?.notifications?.reminders !== false;
+    if (!remindersEnabled) {
+      return res.json({ success: true, reminders: [], count: 0 });
+    }
     const { minutes = 30 } = req.query;
     const minutesAhead = parseInt(minutes);
 
@@ -185,6 +201,16 @@ router.get('/upcoming', auth, async (req, res) => {
 router.get('/today', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const profile = await Profile.findOne({ user: userId }).select('notifications').lean();
+    const remindersEnabled = profile?.notifications?.reminders !== false;
+    if (!remindersEnabled) {
+      return res.json({
+        success: true,
+        reminders: [],
+        count: 0,
+        summary: { totalScheduled: 0, totalTaken: 0 },
+      });
+    }
     const todayReminders = [];
     const now = new Date();
 

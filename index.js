@@ -62,6 +62,7 @@ const supportRoutes = require('./routes/support');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
+const ReminderNotificationScheduler = require('./services/ReminderNotificationScheduler');
 const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
@@ -278,6 +279,15 @@ app.get('/api/test/scheduler-status', (req, res) => {
   }
 });
 
+app.get('/api/test/reminder-scheduler-status', (req, res) => {
+  try {
+    const status = ReminderNotificationScheduler.getStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 
 // -------------------- MongoDB --------------------
@@ -292,6 +302,10 @@ mongoose.connect(MONGO_URI, {
   // Start Health Monitoring Scheduler after DB connection
   console.log('\n🏥 Initializing Health Monitoring System...');
   HealthMonitoringScheduler.start();
+
+  // Start Reminder Notification Scheduler after DB connection
+  console.log('🔔 Initializing Reminder Notification System...');
+  ReminderNotificationScheduler.start();
 })
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
