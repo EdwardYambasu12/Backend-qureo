@@ -54,6 +54,11 @@ const healthPlansRoutes = require('./routes/healthPlans');
 const remindersRoutes = require('./routes/reminders');
 const metricsRoutes = require('./routes/metrics');
 const referralRoutes = require('./routes/referrals');
+const linkedDevicesRoutes = require('./routes/linkedDevices');
+const paymentCardsRoutes = require('./routes/paymentCards');
+const healthGoalsRoutes = require('./routes/healthGoals');
+const securitySettingsRoutes = require('./routes/securitySettings');
+const supportRoutes = require('./routes/support');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
@@ -204,6 +209,11 @@ app.use('/api/medications-management', medicationsManagementRoutes);
 app.use('/api/reminders', remindersRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/referrals', referralRoutes);
+app.use('/api/linked-devices', linkedDevicesRoutes);
+app.use('/api/payment-cards', paymentCardsRoutes);
+app.use('/api/health-goals', healthGoalsRoutes);
+app.use('/api/security-settings', securitySettingsRoutes);
+app.use('/api/support', supportRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
