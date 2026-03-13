@@ -183,6 +183,7 @@ const allowedOrigins = [
   "http://192.168.1.108:8080",
   "http://localhost:8081",
   "http://localhost:8005",
+  "http://localhost:8080",
   "http://192.168.1.112:8080",
   "http://192.168.1.112:8082",
   "http://192.168.205.23:8080",
