@@ -53,6 +53,13 @@ const userMedicationSchema = new mongoose.Schema(
 // Index for efficient queries
 userMedicationSchema.index({ user: 1, isActive: 1 });
 userMedicationSchema.index({ user: 1, createdAt: -1 });
+userMedicationSchema.index(
+  { durationEndDate: 1 },
+  {
+    expireAfterSeconds: 0,
+    partialFilterExpression: { durationEndDate: { $type: 'date' } },
+  }
+);
 
 // Calculate adherence percentage
 userMedicationSchema.methods.calculateAdherence = function () {

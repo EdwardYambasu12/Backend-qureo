@@ -3,6 +3,22 @@ const router = express.Router();
 const UserMedication = require('../models/UserMedication');
 const auth = require('../middleware/auth');
 
+const buildNotExpiredFilter = (now = new Date()) => ({
+  $or: [
+    { durationEndDate: { $exists: false } },
+    { durationEndDate: null },
+    { durationEndDate: { $gt: now } },
+  ],
+});
+
+const normalizeEndDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
 /**
  * USER MEDICATIONS API
  * Endpoints for managing user's active medications and prescriptions
@@ -13,10 +29,12 @@ router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
     const { isActive = true, limit = 50, skip = 0 } = req.query;
+    const now = new Date();
 
     const query = { user: userId };
     if (isActive === 'true') {
       query.isActive = true;
+      Object.assign(query, buildNotExpiredFilter(now));
     }
 
     const medications = await UserMedication.find(query)
@@ -45,10 +63,12 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const userId = req.userId;
     const medicationId = req.params.id;
+    const now = new Date();
 
     const medication = await UserMedication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -103,7 +123,7 @@ router.post('/', auth, async (req, res) => {
       })),
       frequency,
       duration,
-      durationEndDate,
+      durationEndDate: normalizeEndDate(durationEndDate),
       instructions,
       sideEffects,
       category,
@@ -128,10 +148,12 @@ router.put('/:id', auth, async (req, res) => {
     const userId = req.userId;
     const medicationId = req.params.id;
     const updates = req.body;
+    const now = new Date();
 
     const medication = await UserMedication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -147,6 +169,7 @@ router.put('/:id', auth, async (req, res) => {
       'doctorName',
       'frequency',
       'duration',
+      'durationEndDate',
       'instructions',
       'sideEffects',
       'category',
@@ -156,7 +179,7 @@ router.put('/:id', auth, async (req, res) => {
 
     Object.keys(updates).forEach(key => {
       if (allowedUpdates.includes(key)) {
-        medication[key] = updates[key];
+        medication[key] = key === 'durationEndDate' ? normalizeEndDate(updates[key]) : updates[key];
       }
     });
 
@@ -178,10 +201,12 @@ router.post('/:id/mark-dose', auth, async (req, res) => {
     const userId = req.userId;
     const medicationId = req.params.id;
     const { dosageTime, notes } = req.body; // dosageTime = "08:00 AM"
+    const now = new Date();
 
     const medication = await UserMedication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -222,10 +247,12 @@ router.post('/:id/mark-missed', auth, async (req, res) => {
     const userId = req.userId;
     const medicationId = req.params.id;
     const { dosageTime, reason } = req.body;
+    const now = new Date();
 
     const medication = await UserMedication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -262,10 +289,12 @@ router.post('/:id/complete', auth, async (req, res) => {
   try {
     const userId = req.userId;
     const medicationId = req.params.id;
+    const now = new Date();
 
     const medication = await UserMedication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -313,10 +342,12 @@ router.delete('/:id', auth, async (req, res) => {
 router.get('/today/pending', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const now = new Date();
 
     const medications = await UserMedication.find({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
     // Filter to show pending doses for today

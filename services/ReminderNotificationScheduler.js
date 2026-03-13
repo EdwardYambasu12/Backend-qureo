@@ -6,6 +6,14 @@ const ReminderDispatch = require('../models/ReminderDispatch');
 const sendEmail = require('../utils/email');
 const { sendPushToToken } = require('../utils/push');
 
+const buildNotExpiredFilter = (now = new Date()) => ({
+  $or: [
+    { endDate: { $exists: false } },
+    { endDate: null },
+    { endDate: { $gt: now } },
+  ],
+});
+
 class ReminderNotificationScheduler {
   constructor() {
     this.interval = null;
@@ -68,7 +76,7 @@ class ReminderNotificationScheduler {
     const timeKey = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const dateKey = this.getDateKey(now);
 
-    const medications = await Medication.find({ isActive: true, remindMe: true }).lean();
+    const medications = await Medication.find({ isActive: true, remindMe: true, ...buildNotExpiredFilter(now) }).lean();
     if (!medications.length) return;
 
     for (const med of medications) {

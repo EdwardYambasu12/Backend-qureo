@@ -57,12 +57,14 @@ const referralRoutes = require('./routes/referrals');
 const linkedDevicesRoutes = require('./routes/linkedDevices');
 const paymentCardsRoutes = require('./routes/paymentCards');
 const healthGoalsRoutes = require('./routes/healthGoals');
+const healthTipsRoutes = require('./routes/healthTips');
 const securitySettingsRoutes = require('./routes/securitySettings');
 const supportRoutes = require('./routes/support');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
 const ReminderNotificationScheduler = require('./services/ReminderNotificationScheduler');
+const DailyHealthTipScheduler = require('./services/DailyHealthTipScheduler');
 const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
@@ -213,6 +215,7 @@ app.use('/api/referrals', referralRoutes);
 app.use('/api/linked-devices', linkedDevicesRoutes);
 app.use('/api/payment-cards', paymentCardsRoutes);
 app.use('/api/health-goals', healthGoalsRoutes);
+app.use('/api/health-tips', healthTipsRoutes);
 app.use('/api/security-settings', securitySettingsRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/medicines', medicineRoutes);
@@ -288,6 +291,15 @@ app.get('/api/test/reminder-scheduler-status', (req, res) => {
   }
 });
 
+app.get('/api/test/daily-tip-scheduler-status', (req, res) => {
+  try {
+    const status = DailyHealthTipScheduler.getStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 
 // -------------------- MongoDB --------------------
@@ -306,6 +318,10 @@ mongoose.connect(MONGO_URI, {
   // Start Reminder Notification Scheduler after DB connection
   console.log('🔔 Initializing Reminder Notification System...');
   ReminderNotificationScheduler.start();
+
+  // Start Daily Health Tip Scheduler after DB connection
+  console.log('💡 Initializing Daily Health Tip System...');
+  DailyHealthTipScheduler.start();
 })
   .catch(err => console.error('❌ MongoDB connection error:', err));
 

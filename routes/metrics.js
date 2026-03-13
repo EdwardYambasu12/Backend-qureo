@@ -5,6 +5,14 @@ const Medication = require('../models/Medication');
 const HealthAlert = require('../models/HealthAlert');
 const auth = require('../middleware/auth');
 
+const buildNotExpiredFilter = (now = new Date()) => ({
+  $or: [
+    { endDate: { $exists: false } },
+    { endDate: null },
+    { endDate: { $gt: now } },
+  ],
+});
+
 /**
  * METRICS API
  * Fetches real health metrics data from the database for dashboard display
@@ -14,12 +22,12 @@ const auth = require('../middleware/auth');
 router.get('/dashboard', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const now = new Date();
 
     // Get latest vitals
     const latestVitals = await Vitals.findOne({ user: userId }).sort({ createdAt: -1 });
 
     // Get today's vitals
-    const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
@@ -47,12 +55,14 @@ router.get('/dashboard', auth, async (req, res) => {
     const activeMedications = await Medication.countDocuments({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
     // Get today's medications adherence
     const allMedications = await Medication.find({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
     let totalScheduledToday = 0;
@@ -206,13 +216,14 @@ router.get('/vitals', auth, async (req, res) => {
 router.get('/medications', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const now = new Date();
 
     const medications = await Medication.find({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
-    const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
@@ -349,6 +360,7 @@ router.get('/alerts', auth, async (req, res) => {
 router.get('/summary', auth, async (req, res) => {
   try {
     const userId = req.userId;
+    const now = new Date();
 
     // Get latest vitals
     const latestVitals = await Vitals.findOne({ user: userId }).sort({ createdAt: -1 });
@@ -382,6 +394,7 @@ router.get('/summary', auth, async (req, res) => {
     const activeMeds = await Medication.countDocuments({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
     // Alerts

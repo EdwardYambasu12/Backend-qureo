@@ -44,6 +44,13 @@ const profileSchema = new mongoose.Schema({
     push: { type: Boolean, default: true },
     email: { type: Boolean, default: false },
   },
+
+  // units & metrics preferences
+  units: {
+    weight: { type: String, enum: ['kg', 'lbs'], default: 'kg' },
+    distance: { type: String, enum: ['km', 'miles'], default: 'km' },
+    temperature: { type: String, enum: ['°C', '°F'], default: '°C' },
+  },
 }, { timestamps: true });
 
 // Indexes

@@ -6,6 +6,14 @@ const Vitals = require('../models/Vitals');
 const Profile = require('../models/Profile');
 const auth = require('../middleware/auth');
 
+const buildNotExpiredFilter = (now = new Date()) => ({
+  $or: [
+    { endDate: { $exists: false } },
+    { endDate: null },
+    { endDate: { $gt: now } },
+  ],
+});
+
 /**
  * REMINDERS API
  * Manages medication reminders, health check reminders, and alert-based reminders
@@ -26,15 +34,16 @@ router.get('/', auth, async (req, res) => {
       });
     }
     const reminders = [];
+    const now = new Date();
 
     // 1. Get active medications with scheduled times
     const medications = await Medication.find({
       user: userId,
       isActive: true,
       remindMe: true,
+      ...buildNotExpiredFilter(now),
     });
 
-    const now = new Date();
     const currentHour = now.getHours().toString().padStart(2, '0');
     const currentMinute = now.getMinutes().toString().padStart(2, '0');
     const currentTime = `${currentHour}:${currentMinute}`;
@@ -149,6 +158,7 @@ router.get('/upcoming', auth, async (req, res) => {
       user: userId,
       isActive: true,
       remindMe: true,
+      ...buildNotExpiredFilter(now),
     });
 
     medications.forEach(med => {
@@ -219,6 +229,7 @@ router.get('/today', auth, async (req, res) => {
       user: userId,
       isActive: true,
       remindMe: true,
+      ...buildNotExpiredFilter(now),
     });
 
     medications.forEach(med => {
@@ -282,6 +293,7 @@ router.post('/mark-taken', auth, async (req, res) => {
     const medication = await Medication.findOne({
       _id: medicationId,
       user: userId,
+      ...buildNotExpiredFilter(new Date()),
     });
 
     if (!medication) {
@@ -378,6 +390,7 @@ router.get('/statistics', auth, async (req, res) => {
     const medications = await Medication.find({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     });
 
     let totalScheduled = 0;

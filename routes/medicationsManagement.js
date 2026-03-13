@@ -3,15 +3,33 @@ const router = express.Router();
 const Medication = require('../models/Medication');
 const auth = require('../middleware/auth');
 
+const buildNotExpiredFilter = (now = new Date()) => ({
+  $or: [
+    { endDate: { $exists: false } },
+    { endDate: null },
+    { endDate: { $gt: now } },
+  ],
+});
+
+const normalizeEndDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
 // GET all medications for user
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
     const { active } = req.query; // Filter by active status
+    const now = new Date();
 
     const query = { user: userId };
     if (active === 'true') {
       query.isActive = true;
+      Object.assign(query, buildNotExpiredFilter(now));
     } else if (active === 'false') {
       query.isActive = false;
     }
@@ -37,10 +55,12 @@ router.get('/', auth, async (req, res) => {
 router.get('/active', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
+    const now = new Date();
 
     const medications = await Medication.find({
       user: userId,
       isActive: true,
+      ...buildNotExpiredFilter(now),
     }).sort({ startDate: -1 });
 
     res.json({
@@ -62,9 +82,11 @@ router.get('/active', auth, async (req, res) => {
 router.get('/:id', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
+    const now = new Date();
     const medication = await Medication.findOne({
       _id: req.params.id,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -127,7 +149,7 @@ router.post('/', auth, async (req, res) => {
       })),
       prescribedBy,
       startDate: new Date(startDate),
-      endDate: endDate ? new Date(endDate) : null,
+      endDate: normalizeEndDate(endDate),
       reason,
       sideEffects: sideEffects || [],
       notes,
@@ -156,13 +178,18 @@ router.patch('/:id', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
     const updateData = req.body;
+    const now = new Date();
 
     // Remove sensitive fields that shouldn't be updated directly
     delete updateData.user;
     delete updateData.createdAt;
 
+    if (Object.prototype.hasOwnProperty.call(updateData, 'endDate')) {
+      updateData.endDate = normalizeEndDate(updateData.endDate);
+    }
+
     const medication = await Medication.findOneAndUpdate(
-      { _id: req.params.id, user: userId },
+      { _id: req.params.id, user: userId, ...buildNotExpiredFilter(now) },
       updateData,
       { new: true, runValidators: true }
     );
@@ -194,6 +221,7 @@ router.patch('/:id/mark-taken', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
     const { timeIndex } = req.body;
+    const now = new Date();
 
     if (timeIndex === undefined) {
       return res.status(400).json({
@@ -205,6 +233,7 @@ router.patch('/:id/mark-taken', auth, async (req, res) => {
     const medication = await Medication.findOne({
       _id: req.params.id,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -245,6 +274,7 @@ router.patch('/:id/mark-untaken', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
     const { timeIndex } = req.body;
+    const now = new Date();
 
     if (timeIndex === undefined) {
       return res.status(400).json({
@@ -256,6 +286,7 @@ router.patch('/:id/mark-untaken', auth, async (req, res) => {
     const medication = await Medication.findOne({
       _id: req.params.id,
       user: userId,
+      ...buildNotExpiredFilter(now),
     });
 
     if (!medication) {
@@ -328,9 +359,10 @@ router.patch('/:id/deactivate', auth, async (req, res) => {
 router.patch('/:id/reactivate', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
+    const now = new Date();
 
     const medication = await Medication.findOneAndUpdate(
-      { _id: req.params.id, user: userId },
+      { _id: req.params.id, user: userId, ...buildNotExpiredFilter(now) },
       { isActive: true },
       { new: true }
     );

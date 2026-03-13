@@ -40,5 +40,12 @@ const medicationSchema = new mongoose.Schema(
 // Index for efficient queries
 medicationSchema.index({ user: 1, isActive: 1 });
 medicationSchema.index({ user: 1, startDate: -1 });
+medicationSchema.index(
+  { endDate: 1 },
+  {
+    expireAfterSeconds: 0,
+    partialFilterExpression: { endDate: { $type: 'date' } },
+  }
+);
 
 module.exports = mongoose.model('Medication', medicationSchema);
