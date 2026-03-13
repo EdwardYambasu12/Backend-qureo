@@ -13,6 +13,28 @@ const buildNotExpiredFilter = (now = new Date()) => ({
   ],
 });
 
+const isSameDay = (value, now = new Date()) => {
+  if (!value) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toDateString() === now.toDateString();
+};
+
+const isDoseTakenToday = (dose, now = new Date()) => Boolean(dose?.taken && isSameDay(dose?.takenAt, now));
+
+const isDoseSkippedToday = (dose, now = new Date()) => isSameDay(dose?.skippedAt, now);
+
+const getDoseEffectiveDate = (dose, now = new Date()) => {
+  const snoozedUntil = dose?.snoozedUntil ? new Date(dose.snoozedUntil) : null;
+  if (snoozedUntil && !Number.isNaN(snoozedUntil.getTime()) && snoozedUntil > now && snoozedUntil.toDateString() === now.toDateString()) {
+    return snoozedUntil;
+  }
+
+  const [hours = '00', minutes = '00'] = String(dose?.time || '00:00').split(':');
+  const doseDate = new Date(now);
+  doseDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+  return doseDate;
+};
+
 /**
  * METRICS API
  * Fetches real health metrics data from the database for dashboard display
@@ -72,7 +94,7 @@ router.get('/dashboard', auth, async (req, res) => {
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         med.scheduledTimes.forEach(dose => {
           totalScheduledToday++;
-          if (dose.taken && new Date(dose.takenAt) >= todayStart && new Date(dose.takenAt) < todayEnd) {
+          if (isDoseTakenToday(dose, now)) {
             totalTakenToday++;
           }
         });
@@ -238,17 +260,15 @@ router.get('/medications', auth, async (req, res) => {
 
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         med.scheduledTimes.forEach(dose => {
-          const doseTime = dose.time.split(':');
-          const doseDate = new Date();
-          doseDate.setHours(parseInt(doseTime[0]), parseInt(doseTime[1]), 0, 0);
+          const doseDate = getDoseEffectiveDate(dose, now);
 
           scheduled++;
           totalScheduledToday++;
 
-          if (dose.taken && new Date(dose.takenAt) >= todayStart && new Date(dose.takenAt) < todayEnd) {
+          if (isDoseTakenToday(dose, now)) {
             taken++;
             totalTakenToday++;
-          } else if (!dose.taken && doseDate < now) {
+          } else if (!isDoseSkippedToday(dose, now) && doseDate < now) {
             missed++;
             totalMissedToday++;
           }
@@ -275,6 +295,8 @@ router.get('/medications', auth, async (req, res) => {
           time: dose.time,
           taken: dose.taken,
           takenAt: dose.takenAt,
+          skippedAt: dose.skippedAt,
+          snoozedUntil: dose.snoozedUntil,
         })),
       };
     });

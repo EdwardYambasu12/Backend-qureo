@@ -14,6 +14,34 @@ const buildNotExpiredFilter = (now = new Date()) => ({
   ],
 });
 
+const isSameDay = (value, now = new Date()) => {
+  if (!value) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toDateString() === now.toDateString();
+};
+
+const isDoseTakenToday = (dose, now = new Date()) => Boolean(dose?.taken && isSameDay(dose?.takenAt, now));
+
+const isDoseSkippedToday = (dose, now = new Date()) => isSameDay(dose?.skippedAt, now);
+
+const getDoseScheduledDate = (time, baseDate = new Date()) => {
+  const [hours = '00', minutes = '00'] = String(time || '00:00').split(':');
+  const doseDate = new Date(baseDate);
+  doseDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+  return doseDate;
+};
+
+const getDoseEffectiveDate = (dose, now = new Date()) => {
+  const snoozedUntil = dose?.snoozedUntil ? new Date(dose.snoozedUntil) : null;
+  if (snoozedUntil && !Number.isNaN(snoozedUntil.getTime()) && snoozedUntil > now && isSameDay(snoozedUntil, now)) {
+    return snoozedUntil;
+  }
+
+  return getDoseScheduledDate(dose?.time, now);
+};
+
+const formatTime = (date) => `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+
 /**
  * REMINDERS API
  * Manages medication reminders, health check reminders, and alert-based reminders
@@ -51,17 +79,20 @@ router.get('/', auth, async (req, res) => {
     medications.forEach(med => {
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         med.scheduledTimes.forEach((dose, idx) => {
-          const isUpcoming = dose.time > currentTime || (dose.time === currentTime);
-          const alreadyTaken = dose.taken && new Date(dose.takenAt).toDateString() === now.toDateString();
+          const effectiveDate = getDoseEffectiveDate(dose, now);
+          const effectiveTime = formatTime(effectiveDate);
+          const isUpcoming = effectiveTime > currentTime || effectiveTime === currentTime;
+          const alreadyTaken = isDoseTakenToday(dose, now);
+          const skippedToday = isDoseSkippedToday(dose, now);
           
-          if (isUpcoming && !alreadyTaken) {
+          if (isUpcoming && !alreadyTaken && !skippedToday) {
             reminders.push({
               id: `med-${med._id}-${idx}`,
               medicationId: med._id,
               type: 'medication',
               title: `Take ${med.name}`,
               message: `${med.dosage} • ${med.frequency}`,
-              time: dose.time,
+              time: effectiveTime,
               priority: 'medium',
               icon: '💊',
               metadata: {
@@ -71,6 +102,8 @@ router.get('/', auth, async (req, res) => {
                 prescribedBy: med.prescribedBy,
                 reason: med.reason,
                 timeIndex: idx,
+                scheduledTime: dose.time,
+                snoozedUntil: dose.snoozedUntil || null,
               },
               createdAt: med.createdAt,
             });
@@ -164,21 +197,19 @@ router.get('/upcoming', auth, async (req, res) => {
     medications.forEach(med => {
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         med.scheduledTimes.forEach((dose, idx) => {
-          const todayDate = now.toDateString();
-          const timeStr = dose.time.split(':');
-          const doseDate = new Date(now);
-          doseDate.setHours(parseInt(timeStr[0]), parseInt(timeStr[1]), 0, 0);
+          const doseDate = getDoseEffectiveDate(dose, now);
 
           // Check if dose is today and upcoming
           if (doseDate >= now && doseDate <= futureTime) {
-            const alreadyTaken = dose.taken && new Date(dose.takenAt).toDateString() === todayDate;
-            if (!alreadyTaken) {
+            const alreadyTaken = isDoseTakenToday(dose, now);
+            const skippedToday = isDoseSkippedToday(dose, now);
+            if (!alreadyTaken && !skippedToday) {
               upcomingReminders.push({
                 id: `med-${med._id}-${idx}`,
                 medicationId: med._id,
                 type: 'medication',
                 title: `Take ${med.name}`,
-                message: `${med.dosage} • Due at ${dose.time}`,
+                message: `${med.dosage} • Due at ${formatTime(doseDate)}`,
                 dueTime: doseDate,
                 minutesUntilDue: Math.round((doseDate - now) / 60000),
                 timeIndex: idx,
@@ -235,11 +266,13 @@ router.get('/today', auth, async (req, res) => {
     medications.forEach(med => {
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         const takenToday = med.scheduledTimes.filter(dose => {
-          return dose.taken && new Date(dose.takenAt).toDateString() === now.toDateString();
+          return isDoseTakenToday(dose, now);
         });
+        const skippedToday = med.scheduledTimes.filter(dose => isDoseSkippedToday(dose, now));
 
         const scheduledCount = med.scheduledTimes.length;
         const takenCount = takenToday.length;
+        const skippedCount = skippedToday.length;
 
         todayReminders.push({
           id: `med-${med._id}`,
@@ -248,9 +281,18 @@ router.get('/today', auth, async (req, res) => {
           name: med.name,
           dosage: med.dosage,
           frequency: med.frequency,
-          scheduledTimes: med.scheduledTimes,
+          scheduledTimes: med.scheduledTimes.map((dose) => ({
+            time: dose.time,
+            taken: isDoseTakenToday(dose, now),
+            takenAt: dose.takenAt || null,
+            skippedToday: isDoseSkippedToday(dose, now),
+            skippedAt: dose.skippedAt || null,
+            snoozedUntil: dose.snoozedUntil || null,
+            effectiveTime: formatTime(getDoseEffectiveDate(dose, now)),
+          })),
           takenCount,
           scheduledCount,
+          skippedCount,
           adherence: Math.round((takenCount / scheduledCount) * 100),
           reason: med.reason,
           prescribedBy: med.prescribedBy,
@@ -312,6 +354,8 @@ router.post('/mark-taken', auth, async (req, res) => {
 
     medication.scheduledTimes[timeIndex].taken = true;
     medication.scheduledTimes[timeIndex].takenAt = new Date();
+    medication.scheduledTimes[timeIndex].skippedAt = null;
+    medication.scheduledTimes[timeIndex].snoozedUntil = null;
     await medication.save();
 
     res.json({
@@ -324,6 +368,123 @@ router.post('/mark-taken', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error marking reminder',
+      error: error.message,
+    });
+  }
+});
+
+// POST /api/reminders/skip - Skip a medication reminder for today
+router.post('/skip', auth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { medicationId, timeIndex } = req.body;
+
+    if (!medicationId || timeIndex === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'medicationId and timeIndex are required',
+      });
+    }
+
+    const medication = await Medication.findOne({
+      _id: medicationId,
+      user: userId,
+      ...buildNotExpiredFilter(new Date()),
+    });
+
+    if (!medication) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medication not found',
+      });
+    }
+
+    if (!medication.scheduledTimes[timeIndex]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid time index',
+      });
+    }
+
+    medication.scheduledTimes[timeIndex].taken = false;
+    medication.scheduledTimes[timeIndex].takenAt = null;
+    medication.scheduledTimes[timeIndex].skippedAt = new Date();
+    medication.scheduledTimes[timeIndex].snoozedUntil = null;
+    await medication.save();
+
+    res.json({
+      success: true,
+      message: 'Reminder skipped for today',
+      medication,
+    });
+  } catch (error) {
+    console.error('Error skipping reminder:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error skipping reminder',
+      error: error.message,
+    });
+  }
+});
+
+// POST /api/reminders/snooze - Snooze a medication reminder for a few minutes
+router.post('/snooze', auth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { medicationId, timeIndex, minutes = 15 } = req.body;
+    const now = new Date();
+    const snoozeMinutes = Math.min(Math.max(parseInt(minutes, 10) || 15, 5), 180);
+    const snoozedUntil = new Date(now.getTime() + snoozeMinutes * 60000);
+
+    if (snoozedUntil.toDateString() !== now.toDateString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Snooze must stay within the same day',
+      });
+    }
+
+    if (!medicationId || timeIndex === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'medicationId and timeIndex are required',
+      });
+    }
+
+    const medication = await Medication.findOne({
+      _id: medicationId,
+      user: userId,
+      ...buildNotExpiredFilter(now),
+    });
+
+    if (!medication) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medication not found',
+      });
+    }
+
+    if (!medication.scheduledTimes[timeIndex]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid time index',
+      });
+    }
+
+    medication.scheduledTimes[timeIndex].skippedAt = null;
+    medication.scheduledTimes[timeIndex].snoozedUntil = snoozedUntil;
+    await medication.save();
+
+    res.json({
+      success: true,
+      message: `Reminder snoozed for ${snoozeMinutes} minutes`,
+      snoozedUntil,
+      medication,
+    });
+  } catch (error) {
+    console.error('Error snoozing reminder:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error snoozing reminder',
       error: error.message,
     });
   }
@@ -401,12 +562,10 @@ router.get('/statistics', auth, async (req, res) => {
       if (med.scheduledTimes && med.scheduledTimes.length > 0) {
         med.scheduledTimes.forEach(dose => {
           totalScheduled++;
-          if (dose.taken && new Date(dose.takenAt) >= todayStart && new Date(dose.takenAt) < todayEnd) {
+          if (isDoseTakenToday(dose, now)) {
             totalTaken++;
-          } else if (!dose.taken) {
-            const doseTime = dose.time.split(':');
-            const doseDate = new Date();
-            doseDate.setHours(parseInt(doseTime[0]), parseInt(doseTime[1]), 0, 0);
+          } else if (!isDoseSkippedToday(dose, now)) {
+            const doseDate = getDoseEffectiveDate(dose, now);
             if (doseDate < now) {
               totalMissed++;
             }

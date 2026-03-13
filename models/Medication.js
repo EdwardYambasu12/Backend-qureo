@@ -15,6 +15,8 @@ const medicationSchema = new mongoose.Schema(
         time: String,                                    // e.g., "08:00", "14:00", "20:00"
         taken: { type: Boolean, default: false },
         takenAt: Date,
+        skippedAt: Date,
+        snoozedUntil: Date,
       }
     ],
 

@@ -252,6 +252,8 @@ router.patch('/:id/mark-taken', auth, async (req, res) => {
 
     medication.scheduledTimes[timeIndex].taken = true;
     medication.scheduledTimes[timeIndex].takenAt = new Date();
+    medication.scheduledTimes[timeIndex].skippedAt = null;
+    medication.scheduledTimes[timeIndex].snoozedUntil = null;
     await medication.save();
 
     res.json({
@@ -305,6 +307,8 @@ router.patch('/:id/mark-untaken', auth, async (req, res) => {
 
     medication.scheduledTimes[timeIndex].taken = false;
     medication.scheduledTimes[timeIndex].takenAt = null;
+    medication.scheduledTimes[timeIndex].skippedAt = null;
+    medication.scheduledTimes[timeIndex].snoozedUntil = null;
     await medication.save();
 
     res.json({

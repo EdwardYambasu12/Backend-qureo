@@ -41,6 +41,20 @@ class ReminderNotificationScheduler {
     return new Date(dose.takenAt).toDateString() === now.toDateString();
   }
 
+  isDoseSkippedToday(dose, now) {
+    if (!dose?.skippedAt) return false;
+    return new Date(dose.skippedAt).toDateString() === now.toDateString();
+  }
+
+  getDoseReminderTime(dose, now) {
+    const snoozedUntil = dose?.snoozedUntil ? new Date(dose.snoozedUntil) : null;
+    if (snoozedUntil && !Number.isNaN(snoozedUntil.getTime()) && snoozedUntil.toDateString() === now.toDateString()) {
+      return `${String(snoozedUntil.getHours()).padStart(2, '0')}:${String(snoozedUntil.getMinutes()).padStart(2, '0')}`;
+    }
+
+    return String(dose?.time || '');
+  }
+
   async alreadyDispatched({ userId, medicationId, reminderDate, reminderTime, channel }) {
     const found = await ReminderDispatch.findOne({
       user: userId,
@@ -81,7 +95,7 @@ class ReminderNotificationScheduler {
 
     for (const med of medications) {
       const userId = String(med.user);
-      const dueDoses = (med.scheduledTimes || []).filter((dose) => String(dose?.time || '') === timeKey);
+      const dueDoses = (med.scheduledTimes || []).filter((dose) => this.getDoseReminderTime(dose, now) === timeKey);
       if (!dueDoses.length) continue;
 
       const profile = await Profile.findOne({ user: userId }).lean();
@@ -97,6 +111,7 @@ class ReminderNotificationScheduler {
 
       for (const dose of dueDoses) {
         if (this.isDoseTakenToday(dose, now)) continue;
+        if (this.isDoseSkippedToday(dose, now)) continue;
 
         const title = `Medication Reminder: ${med.name}`;
         const body = `${med.dosage} • ${med.frequency} • Due now (${timeKey})`;
