@@ -16,10 +16,11 @@ function isLikelyDuplicatePayload(current, incoming) {
   const sameName = normalizeText(current.fullName) === normalizeText(incoming.fullName);
   const sameGoal = normalizeText(current.goal) === normalizeText(incoming.goal);
   const sameAge = normalizeNum(current.age) === normalizeNum(incoming.age);
+  const sameAgeRange = normalizeText(current.ageRange) === normalizeText(incoming.ageRange);
   const sameWeight = normalizeNum(current.weightKg) === normalizeNum(incoming.weightKg ?? incoming.weight);
   const sameHeight = normalizeNum(current.heightCm) === normalizeNum(incoming.heightCm ?? incoming.height);
   const sameMood = normalizeText(current.mood) === normalizeText(incoming.mood);
-  return sameName && sameGoal && sameAge && sameWeight && sameHeight && sameMood;
+  return sameName && sameGoal && (sameAge || sameAgeRange) && sameWeight && sameHeight && sameMood;
 }
 
 function toNumberOrNull(value) {
@@ -46,6 +47,7 @@ function buildAssessmentPayload(data) {
     fullName: toStringOrEmpty(data.fullName).trim(),
     goal: toStringOrEmpty(data.goal).trim(),
     age: toNumberOrNull(data.age),
+    ageRange: toStringOrEmpty(data.ageRange).trim(),
     dob: data.dob || null,
     gender: toStringOrEmpty(data.gender).trim(),
     bloodType: toStringOrEmpty(data.bloodType).trim(),

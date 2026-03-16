@@ -6,6 +6,7 @@ const assessmentSchema = new mongoose.Schema({
   fullName: { type: String },
   goal: { type: String },
   age: { type: Number },
+  ageRange: { type: String },
   dob: { type: Date },
   gender: { type: String },
   bloodType: { type: String },

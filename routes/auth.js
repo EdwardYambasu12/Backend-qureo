@@ -6,7 +6,10 @@ const ACCESS_EXPIRES = '15m';
 const REFRESH_EXPIRES_SEC = 60 * 60 * 24 * 30; // 30 days in seconds
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Helper function to get consistent cookie options
 function getCookieOptions(isRefreshToken = false) {
@@ -26,6 +29,35 @@ function getCookieOptions(isRefreshToken = false) {
   }
 
   return opts;
+}
+
+function serializeUser(user) {
+  return {
+    id: user._id,
+    fullName: user.fullName,
+    email: user.email,
+    authProvider: user.authProvider || 'password',
+  };
+}
+
+async function verifyGoogleToken(idToken) {
+  const verifyOptions = { idToken };
+  if (process.env.GOOGLE_CLIENT_ID) {
+    verifyOptions.audience = process.env.GOOGLE_CLIENT_ID;
+  }
+
+  const ticket = await googleClient.verifyIdToken(verifyOptions);
+  const payload = ticket.getPayload();
+
+  if (!payload?.sub || !payload?.email) {
+    throw new Error('Google token missing required identity claims');
+  }
+
+  if (!payload.email_verified) {
+    throw new Error('Google account email is not verified');
+  }
+
+  return payload;
 }
 
 // Debug endpoint to check stored tokens
@@ -181,6 +213,10 @@ router.post('/signin', async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
+    if (!user.passwordHash) {
+      return res.status(401).json({ message: 'This account uses Google sign-in' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
@@ -220,12 +256,78 @@ router.post('/signin', async (req, res) => {
   res.cookie('refresh_token', refreshToken, { ...cookieOpts, maxAge: REFRESH_EXPIRES_SEC * 1000 });
 
    res.json({
-  user: { id: user._id, fullName: user.fullName, email: user.email },
+  user: serializeUser(user),
   refreshToken // 👈 send refresh token to frontend
 });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/google', async (req, res) => {
+  const { idToken } = req.body || {};
+  if (!idToken) return res.status(400).json({ message: 'Google token required' });
+
+  try {
+    const googleProfile = await verifyGoogleToken(idToken);
+    const email = String(googleProfile.email || '').toLowerCase().trim();
+
+    let user = await User.findOne({ email });
+    let created = false;
+
+    if (!user) {
+      user = new User({
+        fullName: googleProfile.name || email.split('@')[0] || '',
+        email,
+        passwordHash: null,
+        googleId: googleProfile.sub,
+        authProvider: 'google',
+      });
+      created = true;
+    } else {
+      if (!user.fullName && googleProfile.name) {
+        user.fullName = googleProfile.name;
+      }
+      if (!user.googleId) {
+        user.googleId = googleProfile.sub;
+      }
+      if (!user.authProvider) {
+        user.authProvider = user.passwordHash ? 'password' : 'google';
+      }
+    }
+
+    await clearOldTokens(email);
+
+    const accessToken = jwt.sign(
+      { id: user._id.toString(), email: user.email },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: ACCESS_EXPIRES }
+    );
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    const sameSite = process.env.COOKIE_SAMESITE || 'none';
+    const cookieOpts = {
+      httpOnly: true,
+      sameSite,
+      secure: sameSite === 'none' ? true : process.env.NODE_ENV === 'production',
+      path: '/',
+    };
+
+    res.cookie('access_token', accessToken, cookieOpts);
+    res.cookie('refresh_token', refreshToken, { ...cookieOpts, maxAge: REFRESH_EXPIRES_SEC * 1000 });
+
+    res.json({
+      user: serializeUser(user),
+      refreshToken,
+      created,
+    });
+  } catch (err) {
+    console.error('Google auth error:', err);
+    res.status(401).json({ message: 'Google authentication failed' });
   }
 });
 
@@ -287,11 +389,7 @@ router.post('/refresh', async (req, res) => {
     res.cookie('access_token', accessToken, cookieOpts);
    res.json({
   accessToken, // ✅ send token in response body
-  user: {
-    id: user._id,
-    fullName: user.fullName,
-    email: user.email,
-  },
+  user: serializeUser(user),
 });
   } catch (err) {
     console.error(err);
