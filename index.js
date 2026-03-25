@@ -60,6 +60,7 @@ const healthGoalsRoutes = require('./routes/healthGoals');
 const healthTipsRoutes = require('./routes/healthTips');
 const securitySettingsRoutes = require('./routes/securitySettings');
 const supportRoutes = require('./routes/support');
+const campaignsRoutes = require('./routes/campaigns');
 
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
@@ -219,6 +220,7 @@ app.use('/api/health-goals', healthGoalsRoutes);
 app.use('/api/health-tips', healthTipsRoutes);
 app.use('/api/security-settings', securitySettingsRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);

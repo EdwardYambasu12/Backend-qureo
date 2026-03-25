@@ -218,7 +218,7 @@ router.post('/signin', async (req, res) => {
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+    if (!isMatch) return res.status(401).json({ message: 'Password not correct.' });
 
     // Clear any old tokens before generating new ones
     await clearOldTokens(email);
