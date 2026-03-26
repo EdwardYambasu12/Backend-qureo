@@ -1,6 +1,5 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const Doctor = require('../models/Doctor');
 
 const router = express.Router();
@@ -35,8 +34,14 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(password, doc.passwordHash);
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
-    const token = jwt.sign({ id: doc._id, email: doc.email }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '7d' });
-    return res.json({ token });
+    return res.json({
+      doctor: {
+        id: doc._id,
+        name: doc.name,
+        email: doc.email,
+        specialty: doc.specialty,
+      },
+    });
   } catch (err) {
     console.error('doctor login error', err);
     return res.status(500).json({ message: 'Login failed', error: err.message });

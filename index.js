@@ -199,7 +199,7 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-refresh-token'],
+  allowedHeaders: ['Content-Type'],
 }));
 
 // -------------------- Routes --------------------
@@ -230,7 +230,7 @@ app.use('/api/daily-room', dailyRoomRoutes);
 app.use('/api/doctor', doctorRoutes);
 app.use('/api/doctor/auth', doctorAuthRoutes);
 app.use('/api/gpt', gptRoutes);
-app.use('/api/asha', authMiddleware, ashaRoutes);
+app.use('/api/asha', ashaRoutes);
 app.use('/api/notifications', notificationTokenRoutes);
 app.use("/api/blogs", blog);
 app.use("/api/labtests", labTestRoutes);

@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const Profile = require('../models/Profile');
-const auth = require('../middleware/auth');
 
 // GET /api/profile - get current user's profile
-router.get('/', auth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const uid = await req.userId;
-    const profile = await Profile.findOne({ user: uid });
+    const { userId } = req.query || req.body;
+    if (!userId) return res.status(400).json({ message: 'userId required' });
+    
+    const profile = await Profile.findOne({ user: userId });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
     res.json({ profile });
   } catch (err) {
@@ -17,13 +18,14 @@ router.get('/', auth, async (req, res) => {
 });
 
 // POST /api/profile - create or update profile
-router.post('/', auth, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const data = req.body;
-    const uid = req.userId;
-    let profile = await Profile.findOne({ user: uid });
+    const { userId, ...data } = req.body;
+    if (!userId) return res.status(400).json({ message: 'userId required' });
+    
+    let profile = await Profile.findOne({ user: userId });
     if (!profile) {
-      profile = new Profile({ user: uid, ...data });
+      profile = new Profile({ user: userId, ...data });
     } else {
       Object.assign(profile, data);
     }
@@ -36,14 +38,15 @@ router.post('/', auth, async (req, res) => {
 });
 
 // PATCH /api/profile/avatar - update only the avatar field (accepts URL/base64)
-router.patch('/avatar', auth, async (req, res) => {
+router.patch('/avatar', async (req, res) => {
   try {
-    const { avatar } = req.body;
+    const { userId, avatar } = req.body;
     if (!avatar) return res.status(400).json({ message: 'avatar is required' });
-    const uid = req.userId;
-    let profile = await Profile.findOne({ user: uid });
+    if (!userId) return res.status(400).json({ message: 'userId required' });
+    
+    let profile = await Profile.findOne({ user: userId });
     if (!profile) {
-      profile = new Profile({ user: uid, avatar });
+      profile = new Profile({ user: userId, avatar });
     } else {
       profile.avatar = avatar;
     }
@@ -56,14 +59,14 @@ router.patch('/avatar', auth, async (req, res) => {
 });
 
 // PATCH /api/profile/notifications - update notification preferences
-router.patch('/notifications', auth, async (req, res) => {
+router.patch('/notifications', async (req, res) => {
   try {
-    const { notifications } = req.body;
+    const { userId, notifications } = req.body;
     if (!notifications || typeof notifications !== 'object') return res.status(400).json({ message: 'notifications object is required' });
-    const uid = req.userId;
-    let profile = await Profile.findOne({ user: uid });
+    if (!userId) return res.status(400).json({ message: 'userId required' });
+    let profile = await Profile.findOne({ user: userId });
     if (!profile) {
-      profile = new Profile({ user: uid, notifications });
+      profile = new Profile({ user: userId, notifications });
     } else {
       profile.notifications = { ...profile.notifications, ...notifications };
     }
