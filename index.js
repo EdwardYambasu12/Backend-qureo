@@ -192,11 +192,25 @@ const allowedOrigins = [
 
 ];
 
+const allowedOriginPatterns = [
+  /^https:\/\/([a-z0-9-]+\.)?qureohealth\.com$/i,
+];
+
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) return true;
+  return allowedOriginPatterns.some((pattern) => pattern.test(origin));
+}
+
 
 
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin || isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
@@ -361,7 +375,12 @@ async function getXirsysIceServers() {
 // -------------------- Socket.IO (WebRTC Signaling) --------------------
 const io = new Server(server, { 
   cors: { 
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Socket CORS blocked for origin: ${origin}`));
+    },
     credentials: true 
   } 
 });
