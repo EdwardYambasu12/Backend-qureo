@@ -3,6 +3,8 @@ const router = express.Router();
 const Vitals = require('../models/Vitals');
 const Medication = require('../models/Medication');
 const HealthAlert = require('../models/HealthAlert');
+const HealthAssessment = require('../models/HealthAssessment');
+const Consultation = require('../models/Consultations');
 const auth = require('../middleware/auth');
 
 const buildNotExpiredFilter = (now = new Date()) => ({
@@ -33,6 +35,142 @@ const getDoseEffectiveDate = (dose, now = new Date()) => {
   const doseDate = new Date(now);
   doseDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
   return doseDate;
+};
+
+const clamp = (value, min = 0, max = 100) => Math.min(max, Math.max(min, value));
+
+const mapMoodScore = (mood = '') => {
+  const m = String(mood || '').toLowerCase();
+  if (!m) return null;
+  if (m.includes('excellent') || m.includes('great') || m.includes('happy')) return 90;
+  if (m.includes('good') || m.includes('ok')) return 75;
+  if (m.includes('fair') || m.includes('moderate')) return 60;
+  if (m.includes('bad') || m.includes('sad') || m.includes('anxious')) return 35;
+  if (m.includes('poor') || m.includes('terrible')) return 20;
+  return 55;
+};
+
+const mapSleepScore = (sleepLevel = '') => {
+  const s = String(sleepLevel || '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('excellent') || s.includes('great')) return 90;
+  if (s.includes('good')) return 78;
+  if (s.includes('fair') || s.includes('moderate') || s.includes('ok')) return 58;
+  if (s.includes('poor') || s.includes('bad') || s.includes('insomniac')) return 25;
+  return 55;
+};
+
+const mapSmokeScore = (smokeLevel = '') => {
+  const s = String(smokeLevel || '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('never') || s.includes('no')) return 95;
+  if (s.includes('rare')) return 70;
+  if (s.includes('sometimes') || s.includes('occasion')) return 50;
+  if (s.includes('often') || s.includes('daily') || s.includes('yes')) return 20;
+  return 60;
+};
+
+const mapHeartRateScore = (heartRate) => {
+  if (typeof heartRate !== 'number') return null;
+  if (heartRate >= 60 && heartRate <= 100) return 90;
+  if (heartRate >= 50 && heartRate <= 110) return 70;
+  return 40;
+};
+
+const mapTemperatureScore = (temperature) => {
+  if (typeof temperature !== 'number') return null;
+  if (temperature >= 97 && temperature <= 99.5) return 90;
+  if ((temperature >= 95 && temperature < 97) || (temperature > 99.5 && temperature <= 100.4)) return 65;
+  return 40;
+};
+
+const mapOxygenScore = (oxygenLevel) => {
+  if (typeof oxygenLevel !== 'number') return null;
+  if (oxygenLevel >= 95) return 90;
+  if (oxygenLevel >= 92) return 65;
+  return 35;
+};
+
+const mapBloodPressureScore = (bloodPressure) => {
+  const raw = bloodPressure?.raw || '';
+  const parts = String(raw).split('/').map((value) => parseInt(value, 10));
+  const [systolic, diastolic] = parts;
+  if (!Number.isFinite(systolic) || !Number.isFinite(diastolic)) return null;
+  if (systolic < 120 && diastolic < 80) return 90;
+  if (systolic < 130 && diastolic < 85) return 75;
+  if (systolic < 140 && diastolic < 90) return 55;
+  return 35;
+};
+
+const scoreBand = (score) => {
+  if (score >= 85) return 'Excellent';
+  if (score >= 70) return 'Good';
+  if (score >= 55) return 'Fair';
+  if (score >= 40) return 'Needs Work';
+  return 'Poor';
+};
+
+const avg = (items) => {
+  const valid = items.filter((value) => typeof value === 'number');
+  if (!valid.length) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+};
+
+const computeHealthScore = ({ latestVitals, latestAssessment, medicationSummary, alertsSummary, consultationSummary, weekReadings }) => {
+  const vitalScore = avg([
+    mapHeartRateScore(latestVitals?.heartRate),
+    mapTemperatureScore(latestVitals?.temperature),
+    mapOxygenScore(latestVitals?.oxygenLevel),
+    mapBloodPressureScore(latestVitals?.bloodPressure),
+  ]);
+
+  const lifestyleScore = avg([
+    typeof latestAssessment?.fitnessLevel === 'number' ? clamp((latestAssessment.fitnessLevel / 10) * 100) : null,
+    mapSleepScore(latestAssessment?.sleepLevel),
+    mapMoodScore(latestAssessment?.mood),
+    mapSmokeScore(latestAssessment?.smokeLevel),
+  ]);
+
+  const medicationScore = medicationSummary?.today?.scheduled > 0
+    ? clamp(medicationSummary.today.adherence)
+    : null;
+
+  const alertPenalty = clamp((alertsSummary?.unread || 0) * 3 + (alertsSummary?.critical || 0) * 10, 0, 40);
+  const alertScore = 100 - alertPenalty;
+
+  const engagementScore = avg([
+    weekReadings > 0 ? clamp(40 + Math.min(weekReadings, 7) * 8) : null,
+    consultationSummary?.completedLast90Days > 0 ? clamp(60 + Math.min(consultationSummary.completedLast90Days, 5) * 8) : null,
+  ]);
+
+  const weightedTotal =
+    (typeof vitalScore === 'number' ? vitalScore * 0.35 : 0) +
+    (typeof lifestyleScore === 'number' ? lifestyleScore * 0.25 : 0) +
+    (typeof medicationScore === 'number' ? medicationScore * 0.20 : 0) +
+    (typeof alertScore === 'number' ? alertScore * 0.15 : 0) +
+    (typeof engagementScore === 'number' ? engagementScore * 0.05 : 0);
+
+  const availableWeight =
+    (typeof vitalScore === 'number' ? 0.35 : 0) +
+    (typeof lifestyleScore === 'number' ? 0.25 : 0) +
+    (typeof medicationScore === 'number' ? 0.20 : 0) +
+    (typeof alertScore === 'number' ? 0.15 : 0) +
+    (typeof engagementScore === 'number' ? 0.05 : 0);
+
+  const total = availableWeight > 0 ? Math.round(clamp(weightedTotal / availableWeight)) : 0;
+
+  return {
+    total,
+    label: scoreBand(total),
+    components: {
+      vitals: vitalScore != null ? Math.round(vitalScore) : null,
+      lifestyle: lifestyleScore != null ? Math.round(lifestyleScore) : null,
+      medicationAdherence: medicationScore != null ? Math.round(medicationScore) : null,
+      alerts: alertScore != null ? Math.round(alertScore) : null,
+      engagement: engagementScore != null ? Math.round(engagementScore) : null,
+    },
+    methodology: 'Composite of vitals, lifestyle, medication adherence, alerts, and engagement. Higher is better.',
+  };
 };
 
 /**
@@ -419,15 +557,71 @@ router.get('/summary', auth, async (req, res) => {
       ...buildNotExpiredFilter(now),
     });
 
+    const medications = await Medication.find({
+      user: userId,
+      isActive: true,
+      ...buildNotExpiredFilter(now),
+    });
+
+    let totalScheduledToday = 0;
+    let totalTakenToday = 0;
+    medications.forEach((med) => {
+      (med.scheduledTimes || []).forEach((dose) => {
+        totalScheduledToday++;
+        if (isDoseTakenToday(dose, now)) totalTakenToday++;
+      });
+    });
+
+    const medicationSummary = {
+      today: {
+        scheduled: totalScheduledToday,
+        taken: totalTakenToday,
+        adherence: totalScheduledToday > 0 ? Math.round((totalTakenToday / totalScheduledToday) * 100) : 0,
+      },
+    };
+
     // Alerts
     const unreadAlertsCount = await HealthAlert.countDocuments({
       user: userId,
       read: false,
     });
 
+    const criticalAlertsCount = await HealthAlert.countDocuments({
+      user: userId,
+      read: false,
+      severity: 'critical',
+    });
+
+    const latestAssessment = await HealthAssessment.findOne({ user: userId }).sort({ createdAt: -1 });
+
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+    const [upcomingAppointments, completedLast90Days] = await Promise.all([
+      Consultation.countDocuments({
+        patient: userId,
+        status: { $in: ['scheduled', 'ongoing'] },
+      }),
+      Consultation.countDocuments({
+        patient: userId,
+        status: 'completed',
+        appointmentTime: { $gte: ninetyDaysAgo },
+      }),
+    ]);
+
+    const healthScore = computeHealthScore({
+      latestVitals,
+      latestAssessment,
+      medicationSummary,
+      alertsSummary: { unread: unreadAlertsCount, critical: criticalAlertsCount },
+      consultationSummary: { upcoming: upcomingAppointments, completedLast90Days },
+      weekReadings: weekVitals.length,
+    });
+
     res.json({
       success: true,
       summary: {
+        healthScore,
         lastUpdated: latestVitals?.createdAt || null,
         vitals: latestVitals ? {
           bloodPressure: latestVitals.bloodPressure?.raw || (latestVitals.bloodPressure?.systolic && latestVitals.bloodPressure?.diastolic ? `${latestVitals.bloodPressure.systolic}/${latestVitals.bloodPressure.diastolic}` : null),
@@ -437,8 +631,22 @@ router.get('/summary', auth, async (req, res) => {
           oxygenLevel: latestVitals.oxygenLevel,
           weight: latestVitals.weight,
         } : null,
+        latestAssessment: latestAssessment ? {
+          score: latestAssessment.score,
+          fitnessLevel: latestAssessment.fitnessLevel,
+          sleepLevel: latestAssessment.sleepLevel,
+          mood: latestAssessment.mood,
+          smokeLevel: latestAssessment.smokeLevel,
+          updatedAt: latestAssessment.updatedAt,
+        } : null,
         medicationCount: activeMeds,
+        medication: medicationSummary.today,
         unreadAlerts: unreadAlertsCount,
+        criticalAlerts: criticalAlertsCount,
+        appointments: {
+          upcoming: upcomingAppointments,
+          completedLast90Days,
+        },
         weekReadings: weekVitals.length,
       },
     });

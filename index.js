@@ -171,6 +171,7 @@ app.use(cookieParser());
 
 // -------------------- CORS --------------------
 const allowedOrigins = [
+  'https://app.qureohealth.com',
   'https://qureo.vercel.app',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -189,6 +190,7 @@ const allowedOrigins = [
   "http://192.168.1.112:8082",
   "http://192.168.205.23:8080",
   "http://192.168.1.112:8080",
+  "http://localhost:8070",
 
 ];
 
@@ -211,7 +213,7 @@ app.use(cors({
     }
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
-  credentials: true,
+  
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -339,6 +341,13 @@ mongoose.connect(MONGO_URI, {
   // Start Daily Health Tip Scheduler after DB connection
   console.log('💡 Initializing Daily Health Tip System...');
   DailyHealthTipScheduler.start();
+
+  // Start the HTTP server only after MongoDB is ready so that
+  // no incoming requests are handled before the database is available.
+  const PORT = process.env.PORT || 5001;
+  if (require.main === module) {
+    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  }
 })
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
@@ -499,11 +508,5 @@ io.on("connection", (socket) => {
 });
 
 
-
-// -------------------- Start server --------------------
-const PORT = process.env.PORT || 5001;
-if (require.main === module) {
-  server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-}
 
 module.exports = { app, server };

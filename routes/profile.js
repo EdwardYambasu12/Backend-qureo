@@ -2,6 +2,17 @@ const express = require('express');
 const router = express.Router();
 const Profile = require('../models/Profile');
 
+// GET /api/profile/all - get all user profiles (admin)
+router.get('/all', async (req, res) => {
+  try {
+    const profiles = await Profile.find({}).sort({ createdAt: -1 });
+    res.json(profiles);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET /api/profile - get current user's profile
 router.get('/', async (req, res) => {
   try {

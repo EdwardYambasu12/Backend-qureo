@@ -40,6 +40,20 @@ const doctorSchema = new mongoose.Schema({
   },
   experience: { type: Number, default: 0 }, // in years
   education: { type: [String], default: [] }, // e.g., ["Harvard Medical School", "Residency at XYZ Hospital"]
+  qualifications: { type: [String], default: [] }, // e.g., ["MBBS", "MD", "Cardiology Specialization"]
+
+  // Professional Information
+  licenseNumber: { type: String }, // BMDC or License number
+  doctorCode: { type: String }, // Unique doctor code (e.g., DT8173)
+  clinicName: { type: String }, // Name of clinic/hospital
+  
+  // Consultation Fees
+  consultationFeeRemote: { type: Number, default: 170 }, // Online consultation fee
+  consultationFeeInPerson: { type: Number, default: 65 }, // In-person/follow-up fee
+  
+  // Statistics
+  patientsAttended: { type: Number, default: 0 }, // Number of patients attended
+  joinDate: { type: Date, default: Date.now }, // When doctor joined the platform
 
   // Auth fields
   passwordHash: { type: String },
