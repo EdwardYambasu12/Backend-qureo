@@ -174,6 +174,7 @@ const allowedOrigins = [
   'https://app.qureohealth.com',
   'https://qureo.vercel.app',
   'https://qureodoctor.vercel.app',
+  'https://qureodoctor.vercel.app',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   "http://localhost:8005",
@@ -216,7 +217,7 @@ app.use(cors({
   },
   
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // -------------------- Routes --------------------
