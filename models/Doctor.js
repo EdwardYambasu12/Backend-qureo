@@ -58,6 +58,7 @@ const doctorSchema = new mongoose.Schema({
   // Auth fields
   passwordHash: { type: String },
   isVerified: { type: Boolean, default: false },
+  isSuspended: { type: Boolean, default: false },
 
   // GeoJSON location
   location: {

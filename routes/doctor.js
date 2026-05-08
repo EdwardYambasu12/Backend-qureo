@@ -197,6 +197,7 @@ router.get("/nearby", async (req, res) => {
     const distance = (Number.isFinite(radiusNum) ? radiusNum : 5) * 1000; // convert km to meters
 
     const doctors = await Doctor.find({
+      isSuspended: { $ne: true },
       location: {
         $near: {
           $geometry: {
@@ -206,7 +207,7 @@ router.get("/nearby", async (req, res) => {
           $maxDistance: distance,
         },
       },
-    });
+    }, { passwordHash: 0 });
 
     res.json(doctors);
   } catch (err) {
@@ -227,13 +228,14 @@ router.get("/search", async (req, res) => {
     const regex = new RegExp(query, "i");
 
     const doctors = await Doctor.find({
+      isSuspended: { $ne: true },
       $or: [
         { name: regex },
         { specialty: regex },
         { city: regex },
         { skills: regex },
       ],
-    });
+    }, { passwordHash: 0 });
 
     res.json({ results: doctors });
   } catch (err) {
@@ -246,7 +248,10 @@ router.get("/search", async (req, res) => {
 router.get("/specialty/:specialty",  async (req, res) => {
   try {
     const { specialty } = req.params;
-    const doctors = await Doctor.find({ specialty: { $regex: new RegExp(specialty, "i") } }); // case-insensitive search
+    const doctors = await Doctor.find({
+      specialty: { $regex: new RegExp(specialty, "i") },
+      isSuspended: { $ne: true },
+    }, { passwordHash: 0 }); // case-insensitive search
     res.json(doctors);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch doctors", error: err.message });
@@ -258,7 +263,12 @@ router.get("/specialty/:specialty",  async (req, res) => {
 // ✅ Get All Doctors
 router.get("/", async (req, res) => {
   try {
-    const doctors = await Doctor.find();
+    const includeSuspended = req.query.includeSuspended === "true";
+    const filter = includeSuspended ? {} : { isSuspended: { $ne: true } };
+    const doctors = await Doctor.find(
+      filter,
+      { passwordHash: 0 }
+    ).sort({ createdAt: -1 });
     res.json(doctors);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -268,7 +278,7 @@ router.get("/", async (req, res) => {
 router.get("/active", async (req, res) => {
   try {
     const doctors = await Doctor.find(
-      { certified: true },
+      { certified: true, isSuspended: { $ne: true } },
       { passwordHash: 0 } // exclude sensitive fields
     ).sort({ createdAt: -1 });
 
@@ -294,6 +304,7 @@ router.get("/available", async (req, res) => {
 
     const query = {
       certified: true,
+      isSuspended: { $ne: true },
       "availability.isAvailable": true,
     };
 
@@ -352,7 +363,7 @@ router.get("/smart", async (req, res) => {
     } = req.query;
 
     const todayKey = getTodayKey();
-    const query = {};
+    const query = { isSuspended: { $ne: true } };
 
     // ---- Filters ----
     if (active === "true") query.certified = true;
@@ -416,6 +427,7 @@ router.get("/online", async (req, res) => {
     const doctors = await Doctor.find(
       {
         isOnline: true,
+        isSuspended: { $ne: true },
         [`availability.${todayKey}`]: { $exists: true, $ne: [] },
       },
       { passwordHash: 0 }
@@ -521,7 +533,11 @@ router.get("/:id", async (req, res) => {
 router.put("/:id/update", async (req, res) => {
   try {
     const updates = req.body; // e.g. { certified: true, skills: ["Surgery", "Cardiology"], moreOptions: { language: "English" } }
-    const doctor = await Doctor.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const doctor = await Doctor.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+      projection: { passwordHash: 0 },
+    });
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
     res.json({ message: "Doctor updated", doctor });
   } catch (error) {

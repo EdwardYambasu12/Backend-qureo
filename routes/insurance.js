@@ -10,7 +10,8 @@ const Transaction = require('../models/Transaction');
 // Get all insurance plans
 router.get('/plans', async (req, res) => {
   try {
-    const plans = await InsurancePlan.find({ isActive: true })
+    // Include legacy records where isActive was never set.
+    const plans = await InsurancePlan.find({ isActive: { $ne: false } })
       .sort({ monthlyPremium: 1 });
 
     res.json({
@@ -285,6 +286,94 @@ router.post('/plans', async (req, res) => {
       success: false,
       message: 'Server error while creating insurance plan',
       error: error.message
+    });
+  }
+});
+
+// Update insurance plan
+router.put('/plans/:id', async (req, res) => {
+  try {
+    const {
+      name,
+      code,
+      description,
+      monthlyPremium,
+      coverageLimit,
+      coverageDetails,
+      benefits,
+      isActive,
+    } = req.body;
+
+    const plan = await InsurancePlan.findById(req.params.id);
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        message: 'Insurance plan not found',
+      });
+    }
+
+    if (code && code !== plan.code) {
+      const existingPlan = await InsurancePlan.findOne({ code, _id: { $ne: plan._id } });
+      if (existingPlan) {
+        return res.status(400).json({
+          success: false,
+          message: `Plan with code "${code}" already exists`,
+        });
+      }
+    }
+
+    plan.name = name ?? plan.name;
+    plan.code = code ?? plan.code;
+    plan.description = description ?? plan.description;
+    plan.monthlyPremium = monthlyPremium !== undefined ? parseFloat(monthlyPremium) : plan.monthlyPremium;
+    plan.coverageLimit = coverageLimit !== undefined ? parseFloat(coverageLimit) : plan.coverageLimit;
+    plan.coverageDetails = Array.isArray(coverageDetails) ? coverageDetails : plan.coverageDetails;
+    plan.benefits = Array.isArray(benefits) ? benefits : plan.benefits;
+    if (isActive !== undefined) {
+      plan.isActive = !!isActive;
+    }
+
+    await plan.save();
+
+    res.json({
+      success: true,
+      message: 'Insurance plan updated successfully',
+      plan,
+    });
+  } catch (error) {
+    console.error('Error updating plan:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating insurance plan',
+      error: error.message,
+    });
+  }
+});
+
+// Delete insurance plan (soft delete)
+router.delete('/plans/:id', async (req, res) => {
+  try {
+    const plan = await InsurancePlan.findById(req.params.id);
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        message: 'Insurance plan not found',
+      });
+    }
+
+    plan.isActive = false;
+    await plan.save();
+
+    res.json({
+      success: true,
+      message: 'Insurance plan deleted successfully',
+    });
+  } catch (error) {
+    console.error('Error deleting plan:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting insurance plan',
+      error: error.message,
     });
   }
 });

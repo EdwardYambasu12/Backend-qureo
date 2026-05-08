@@ -214,6 +214,30 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ✅ Update a medicine by ID
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const updatedMedicine = await Medicine.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedMedicine) {
+      return res.status(404).json({ message: 'Medicine not found' });
+    }
+
+    res.json({
+      message: 'Medicine updated successfully',
+      medicine: updatedMedicine,
+    });
+  } catch (err) {
+    console.error('❌ Update medicine error:', err);
+    res.status(500).json({ message: 'Failed to update medicine', error: err.message });
+  }
+});
+
 
 router.get('/:id', async (req, res) => {
   try {
