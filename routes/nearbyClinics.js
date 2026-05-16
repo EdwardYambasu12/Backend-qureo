@@ -23,7 +23,7 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const { name, area, eta, address, phone, isActive } = req.body;
+    const { name, area, eta, image, address, phone, isActive } = req.body;
 
     if (!name || !area || !eta) {
       return res.status(400).json({ message: "name, area and eta are required" });
@@ -33,6 +33,7 @@ router.post("/", async (req, res) => {
       name,
       area,
       eta,
+      image,
       address,
       phone,
       isActive: typeof isActive === "boolean" ? isActive : true,
