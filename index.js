@@ -176,6 +176,7 @@ const allowedOrigins = [
   'https://qureo.vercel.app',
   'https://qureodoctor.vercel.app',
   'https://qureodoctor.vercel.app',
+  'http://192.168.208.23:3000',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   "http://localhost:8005",
