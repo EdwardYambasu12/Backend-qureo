@@ -487,6 +487,14 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Forward doctor prescriptions to everyone else in the same consultation room
+  socket.on("prescription-from-doctor", ({ room, prescription }) => {
+    if (!room || !prescription) return;
+
+    socket.to(room).emit("prescription-from-doctor", prescription);
+    socket.emit("prescription-sent", { success: true, room });
+  });
+
   // Handle user leaving
   socket.on("disconnect", () => {
     console.log("❌ Socket disconnected:", socket.id);
