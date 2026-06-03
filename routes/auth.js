@@ -35,6 +35,30 @@ async function verifyGoogleToken(idToken) {
   return payload;
 }
 
+async function fetchGoogleProfileFromAccessToken(accessToken) {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Invalid Google access token');
+  }
+
+  const payload = await response.json();
+
+  if (!payload?.sub || !payload?.email) {
+    throw new Error('Google access token missing required identity claims');
+  }
+
+  if (!payload.email_verified) {
+    throw new Error('Google account email is not verified');
+  }
+
+  return payload;
+}
+
 // POST /api/auth/signup (no JWT)
 router.post('/signup', async (req, res) => {
   const { fullName, email, password } = req.body;
@@ -85,11 +109,16 @@ router.post('/signin', async (req, res) => {
 });
 
 router.post('/google', async (req, res) => {
-  const { idToken } = req.body || {};
-  if (!idToken) return res.status(400).json({ message: 'Google token required' });
+  const { idToken, credential, accessToken } = req.body || {};
+  const effectiveIdToken = idToken || credential;
+  if (!effectiveIdToken && !accessToken) {
+    return res.status(400).json({ message: 'Google token required' });
+  }
 
   try {
-    const googleProfile = await verifyGoogleToken(idToken);
+    const googleProfile = effectiveIdToken
+      ? await verifyGoogleToken(effectiveIdToken)
+      : await fetchGoogleProfileFromAccessToken(accessToken);
     const email = String(googleProfile.email || '').toLowerCase().trim();
 
     let user = await User.findOne({ email });
