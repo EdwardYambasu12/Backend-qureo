@@ -356,7 +356,7 @@ mongoose.connect(MONGO_URI, {
 })
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
-// -------------------- ICE Servers (Xirsys) --------------------
+// -------------------- ICE Servers (Cloudflare) --------------------
 function getStaticTurnIceServers() {
   const turnUrl = process.env.TURN_URL;
   const turnUsername = process.env.TURN_USERNAME;
@@ -377,28 +377,28 @@ function getStaticTurnIceServers() {
 
 async function getXirsysIceServers() {
   try {
-    const username = process.env.XIRSYS_USER;
-    const secret = process.env.XIRSYS_SECRET;
+    const apiToken = process.env.CLOUDFLARE_TURN_API_TOKEN;
+    const turnKeyId = process.env.CLOUDFLARE_TURN_KEY_ID;
+    const ttl = Number(process.env.CLOUDFLARE_TURN_TTL || 86400);
 
-    if (!username || !secret) {
+    if (!apiToken || !turnKeyId) {
       return [];
     }
 
-    const channel = process.env.XIRSYS_CHANNEL || "MyFirstApp";
-    const response = await axios.put(
-      `https://global.xirsys.net/_turn/${channel}`,
-      { format: "urls" },
+    const response = await axios.post(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${turnKeyId}/credentials/generate-ice-servers`,
+      { ttl },
       {
         headers: {
-          Authorization: "Basic " + Buffer.from(`${username}:${secret}`).toString("base64"),
+          Authorization: `Bearer ${apiToken}`,
           "Content-Type": "application/json",
         },
       }
     );
 
-    return response.data?.v?.iceServers || [];
+    return response.data?.iceServers || response.data?.result?.iceServers || [];
   } catch (err) {
-    console.error("❌ Failed to fetch Xirsys ICE servers:", err.message || err);
+    console.error("❌ Failed to fetch Cloudflare ICE servers:", err.message || err);
     return [];
   }
 }
