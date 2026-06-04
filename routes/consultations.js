@@ -8,6 +8,20 @@ const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
 
+const resolveDurationMinutes = (duration, durationMinutes) => {
+  const directDuration = Number(durationMinutes);
+  if (Number.isFinite(directDuration) && directDuration > 0) {
+    return Math.round(directDuration);
+  }
+
+  const fallbackDuration = Number(duration);
+  if (Number.isFinite(fallbackDuration) && fallbackDuration > 0) {
+    return Math.round(fallbackDuration);
+  }
+
+  return 30;
+};
+
   const router = express.Router();
   // start background checker once
   if (!global.__consultationCheckerStarted) {
@@ -150,7 +164,8 @@ const sendSMS = require("../utils/sms");
   // Create a new consultation
   router.post("/", async (req, res) => {
     try {
-      const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ } = req.body;
+      const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_, duration, durationMinutes } = req.body;
+      const resolvedDurationMinutes = resolveDurationMinutes(duration, durationMinutes);
       console.log(patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ )
       const roomId = `room-${uuidv4()}`;
 
@@ -159,6 +174,7 @@ const sendSMS = require("../utils/sms");
         doctor,
         mode,
         appointmentTime,
+        durationMinutes: resolvedDurationMinutes,
         reason,
         roomId,
         patientEmail,
@@ -182,7 +198,8 @@ const sendSMS = require("../utils/sms");
 // Create a new consultation
 router.post("/", async (req, res) => {
   try {
-    const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ } = req.body;
+    const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_, duration, durationMinutes } = req.body;
+    const resolvedDurationMinutes = resolveDurationMinutes(duration, durationMinutes);
     console.log(patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ )
     const roomId = `room-${uuidv4()}`;
 
@@ -191,6 +208,7 @@ router.post("/", async (req, res) => {
       doctor,
       mode,
       appointmentTime,
+      durationMinutes: resolvedDurationMinutes,
       reason,
       roomId,
       patientEmail,
@@ -263,6 +281,33 @@ router.put("/:id/reschedule", auth, async (req, res) => {
     res.json(consultation);
   } catch (err) {
     res.status(500).json({ message: "Failed to reschedule consultation", error: err.message });
+  }
+});
+
+// Mark consultation completed (used when paid time expires in call room)
+router.put("/:id/complete", async (req, res) => {
+  try {
+    const { reason = "time_elapsed", endedAt = new Date().toISOString(), callDuration } = req.body || {};
+    const update = {
+      status: "completed",
+      updatedAt: new Date(),
+      endedAt: new Date(endedAt),
+      completionReason: reason,
+    };
+
+    if (Number.isFinite(Number(callDuration)) && Number(callDuration) >= 0) {
+      update.callDuration = Number(callDuration);
+    }
+
+    const consultation = await Consultation.findByIdAndUpdate(req.params.id, update, { new: true });
+
+    if (!consultation) {
+      return res.status(404).json({ message: "Consultation not found" });
+    }
+
+    res.json({ success: true, consultation });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to complete consultation", error: err.message });
   }
 });
 

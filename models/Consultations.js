@@ -7,6 +7,7 @@ const consultationSchema = new mongoose.Schema({
   doctor: { type: mongoose.Schema.Types.ObjectId, ref: "Doctor", required: true },
   mode: { type: String, enum: ["video", "in-person", "audio", "phone"], required: true },
   appointmentTime: { type: Date, required: true },
+  durationMinutes: { type: Number, min: 1, default: 30 },
   reason: { type: String, required: true },
   roomId: { type: String, required: true, unique: true },
   status: { type: String, enum: ["scheduled", "completed", "ongoing", "cancelled"], default: "scheduled" },
