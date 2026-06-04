@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-async function sendPushToToken(token, title, body, data = {}) {
+async function sendPushToToken(token, title, body, data = {}, withMessage = false) {
   const serverKey = process.env.FIREBASE_SERVER_KEY;
   if (!serverKey) {
     return { success: false, skipped: true, reason: 'FIREBASE_SERVER_KEY not configured' };
@@ -10,15 +10,26 @@ async function sendPushToToken(token, title, body, data = {}) {
     return { success: false, skipped: true, reason: 'No device token provided' };
   }
 
+  const payload = {
+    to: token,
+    priority: 'high',
+  };
+
+  if (withMessage) {
+    payload.message = {
+      token,
+      notification: { title, body },
+      data,
+    };
+  } else {
+    payload.notification = { title, body };
+    payload.data = data;
+  }
+
   try {
     const response = await axios.post(
       'https://fcm.googleapis.com/fcm/send',
-      {
-        to: token,
-        notification: { title, body },
-        data,
-        priority: 'high',
-      },
+      payload,
       {
         headers: {
           Authorization: `key=${serverKey}`,
@@ -38,6 +49,12 @@ async function sendPushToToken(token, title, body, data = {}) {
   } catch (error) {
     return {
       success: false,
+      skipped: false,
+      reason: error.message,
+      raw: error.response?.data,
+    };
+  }
+}
       skipped: false,
       reason: error?.response?.data?.error || error.message || 'Push send error',
     };

@@ -67,6 +67,7 @@ const nearbyClinicsRoutes = require('./routes/nearbyClinics');
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
 const ReminderNotificationScheduler = require('./services/ReminderNotificationScheduler');
 const DailyHealthTipScheduler = require('./services/DailyHealthTipScheduler');
+const ConsultationReminderScheduler = require('./services/ConsultationReminderScheduler');
 const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
@@ -324,6 +325,15 @@ app.get('/api/test/daily-tip-scheduler-status', (req, res) => {
   }
 });
 
+app.get('/api/test/consultation-reminder-status', (req, res) => {
+  try {
+    const status = ConsultationReminderScheduler.getStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 
 // -------------------- MongoDB --------------------
@@ -346,6 +356,10 @@ mongoose.connect(MONGO_URI, {
   // Start Daily Health Tip Scheduler after DB connection
   console.log('💡 Initializing Daily Health Tip System...');
   DailyHealthTipScheduler.start();
+
+  // Start Consultation Reminder Scheduler after DB connection
+  console.log('📞 Initializing Consultation Reminder System...');
+  ConsultationReminderScheduler.start();
 
   // Start the HTTP server only after MongoDB is ready so that
   // no incoming requests are handled before the database is available.
