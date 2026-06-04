@@ -357,18 +357,36 @@ mongoose.connect(MONGO_URI, {
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // -------------------- ICE Servers (Xirsys) --------------------
+function getStaticTurnIceServers() {
+  const turnUrl = process.env.TURN_URL;
+  const turnUsername = process.env.TURN_USERNAME;
+  const turnCredential = process.env.TURN_CREDENTIAL;
+
+  if (!turnUrl || !turnUsername || !turnCredential) {
+    return [];
+  }
+
+  return [
+    {
+      urls: turnUrl,
+      username: turnUsername,
+      credential: turnCredential,
+    },
+  ];
+}
+
 async function getXirsysIceServers() {
   try {
     const username = process.env.XIRSYS_USER;
     const secret = process.env.XIRSYS_SECRET;
 
     if (!username || !secret) {
-      console.warn("XIRSYS credentials not set, using default STUN only");
       return [];
     }
 
+    const channel = process.env.XIRSYS_CHANNEL || "MyFirstApp";
     const response = await axios.put(
-      "https://global.xirsys.net/_turn/MyFirstApp",
+      `https://global.xirsys.net/_turn/${channel}`,
       { format: "urls" },
       {
         headers: {
@@ -418,8 +436,18 @@ io.on("connection", (socket) => {
       activeRooms.get(roomId).add(socket.id);
 
       // Send ICE servers (TURN/STUN)
-      const iceServers = await getXirsysIceServers();
+      let iceServers = await getXirsysIceServers();
+
+      if (!iceServers.length) {
+        const staticTurn = getStaticTurnIceServers();
+        if (staticTurn.length) {
+          iceServers = staticTurn;
+          console.log("Using static TURN credentials from environment");
+        }
+      }
+
       if (iceServers.length === 0) {
+        console.warn("TURN unavailable: falling back to STUN only");
         iceServers.push({ urls: "stun:stun.l.google.com:19302" });
       }
       socket.emit("ice-servers", iceServers);
