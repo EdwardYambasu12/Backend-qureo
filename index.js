@@ -375,34 +375,63 @@ function getStaticTurnIceServers() {
   ];
 }
 
-async function getXirsysIceServers() {
+async function getCloudflareIceServers() {
   try {
-    const apiToken = process.env.CLOUDFLARE_TURN_API_TOKEN;
-    const turnKeyId = process.env.CLOUDFLARE_TURN_KEY_ID;
-    const ttl = Number(process.env.CLOUDFLARE_TURN_TTL || 86400);
+    const username = process.env.XIRSYS_USER;
+    const secret = process.env.XIRSYS_SECRET;
+    const channel = process.env.XIRSYS_CHANNEL || "MyFirstApp";
 
-    if (!apiToken || !turnKeyId) {
+    if (!username || !secret) {
+      console.warn("❌ Xirsys TURN env is incomplete", {
+        hasUser: !!username,
+        hasSecret: !!secret,
+      });
       return [];
     }
 
-    const response = await axios.post(
-      `https://rtc.live.cloudflare.com/v1/turn/keys/${turnKeyId}/credentials/generate-ice-servers`,
-      { ttl },
+    const bodyString = JSON.stringify({ format: "urls" });
+    const auth = Buffer.from(`${username}:${secret}`).toString("base64");
+
+    console.log("🔐 Requesting Xirsys TURN credentials", { channel, username });
+
+    const response = await axios.put(
+      `https://global.xirsys.net/_turn/${channel}`,
+      { format: "urls" },
       {
         headers: {
-          Authorization: `Bearer ${apiToken}`,
+          Authorization: `Basic ${auth}`,
           "Content-Type": "application/json",
+          "Content-Length": bodyString.length,
         },
+        timeout: 10000,
       }
     );
 
-    return response.data?.iceServers || response.data?.result?.iceServers || [];
+    const raw = response.data;
+
+    // Xirsys returns iceServers as a single object, not an array
+    const xirsysIce = raw?.v?.iceServers;
+    let iceServers = [];
+    if (Array.isArray(xirsysIce)) {
+      iceServers = xirsysIce;
+    } else if (xirsysIce && typeof xirsysIce === "object") {
+      iceServers = [xirsysIce];
+    }
+
+    console.log("✅ Xirsys TURN parsed", {
+      count: iceServers.length,
+      urls: iceServers.map((s) => s.urls),
+    });
+    return iceServers;
   } catch (err) {
-    console.error("❌ Failed to fetch Cloudflare ICE servers:", err.message || err);
+    console.error("❌ Failed to fetch Xirsys ICE servers", {
+      message: err.message,
+      status: err.response?.status,
+      data: err.response?.data,
+    });
     return [];
   }
 }
-
 
 // -------------------- Socket.IO (WebRTC Signaling) --------------------
 const io = new Server(server, { 
@@ -428,6 +457,10 @@ io.on("connection", (socket) => {
     try {
       socket.join(roomId);
       console.log(`🔹 ${socket.id} joined room ${roomId}`);
+      console.log("🔎 TURN/ICE join request:", {
+        socketId: socket.id,
+        roomId,
+      });
       
       // Add socket to room tracking
       if (!activeRooms.has(roomId)) {
@@ -436,7 +469,13 @@ io.on("connection", (socket) => {
       activeRooms.get(roomId).add(socket.id);
 
       // Send ICE servers (TURN/STUN)
-      let iceServers = await getXirsysIceServers();
+      let iceServers = await getCloudflareIceServers();
+
+      console.log("🔎 Cloudflare ICE servers before fallback:", {
+        roomId,
+        count: iceServers.length,
+        serverTypes: iceServers.map((server) => server?.urls),
+      });
 
       if (!iceServers.length) {
         const staticTurn = getStaticTurnIceServers();
@@ -450,6 +489,12 @@ io.on("connection", (socket) => {
         console.warn("TURN unavailable: falling back to STUN only");
         iceServers.push({ urls: "stun:stun.l.google.com:19302" });
       }
+
+      console.log("📡 Emitting ICE servers to client:", {
+        roomId,
+        count: iceServers.length,
+        serverTypes: iceServers.map((server) => server?.urls),
+      });
       socket.emit("ice-servers", iceServers);
 
       // Get other users in the room
