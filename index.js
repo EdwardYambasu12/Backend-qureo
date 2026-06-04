@@ -423,6 +423,8 @@ async function getCloudflareIceServers() {
 
     const raw = response.data;
 
+    console.log("✅ Xirsys TURN response received", response.data);
+
     // Xirsys returns iceServers as a single object, not an array
     const xirsysIce = raw?.v?.iceServers;
     let iceServers = [];
