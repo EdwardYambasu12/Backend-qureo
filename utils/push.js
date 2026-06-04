@@ -50,13 +50,8 @@ async function sendPushToToken(token, title, body, data = {}, withMessage = fals
     return {
       success: false,
       skipped: false,
-      reason: error.message,
-      raw: error.response?.data,
-    };
-  }
-}
-      skipped: false,
       reason: error?.response?.data?.error || error.message || 'Push send error',
+      raw: error.response?.data,
     };
   }
 }
