@@ -16,7 +16,8 @@ router.post("/save", async (req, res) => {
       requiresPharmacistReview,
       title,
       owner,
-      imageUrl
+      imageUrl,
+      source: "uploaded",
     });
 
 
@@ -37,6 +38,25 @@ router.get("/", async(req, res)=>{
     res.json(all_data)
 
 })
+
+router.get("/patient/:patientId", async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const records = await Prescription.find({
+      $or: [
+        { patientId },
+        { owner: patientId },
+      ],
+    }).sort({ issuedDate: -1, createdAt: -1 });
+
+    return res.json({
+      success: true,
+      prescriptions: records,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to fetch patient prescriptions" });
+  }
+});
 
 router.post("/")
 

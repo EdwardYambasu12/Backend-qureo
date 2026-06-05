@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const Consultation = require("../models/Consultations");
 const Doctor = require("../models/Doctor");
 const Profile = require("../models/Profile");
+const Prescription = require("../models/Prescription");
 const auth = require("../middleware/auth");
 const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
@@ -308,6 +309,72 @@ router.put("/:id/complete", async (req, res) => {
     res.json({ success: true, consultation });
   } catch (err) {
     res.status(500).json({ message: "Failed to complete consultation", error: err.message });
+  }
+});
+
+// Create doctor-issued prescription records for the consultation patient
+router.post("/:id/prescription/create", async (req, res) => {
+  try {
+    const consultation = await Consultation.findById(req.params.id);
+    if (!consultation) {
+      return res.status(404).json({ success: false, error: "Consultation not found" });
+    }
+
+    const medicines = Array.isArray(req.body?.medicines)
+      ? req.body.medicines.filter((med) => med && String(med.name || "").trim())
+      : [];
+
+    if (!medicines.length) {
+      return res.status(400).json({ success: false, error: "At least one medicine is required" });
+    }
+
+    const sharedData = {
+      source: "doctor_consultation",
+      consultationId: consultation._id,
+      patientId: consultation.patient,
+      doctorId: consultation.doctor,
+      doctorName: consultation?.doctor_?.name || "Doctor",
+      instructions: req.body?.instructions || "",
+      followUpDate: req.body?.followUpDate || null,
+      diagnosis: req.body?.diagnosis || "",
+      doctorNotes: req.body?.doctorNotes || "",
+      labTests: Array.isArray(req.body?.labTests) ? req.body.labTests.filter(Boolean) : [],
+      issuedDate: new Date(),
+      requiresPharmacistReview: false,
+      owner: String(consultation.patient || ""),
+    };
+
+    const docs = medicines.map((med) => ({
+      ...sharedData,
+      medicineName: med.name,
+      dosage: med.dosage || "",
+      frequency: med.frequency || "",
+      duration: med.duration || "",
+    }));
+
+    const saved = await Prescription.insertMany(docs);
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        prescription: {
+          consultationId: consultation._id,
+          patientId: consultation.patient,
+          doctorId: consultation.doctor,
+          doctorName: consultation?.doctor_?.name || "Doctor",
+          medicines,
+          instructions: sharedData.instructions,
+          followUpDate: sharedData.followUpDate,
+          diagnosis: sharedData.diagnosis,
+          doctorNotes: sharedData.doctorNotes,
+          labTests: sharedData.labTests,
+          issuedDate: sharedData.issuedDate,
+          ids: saved.map((item) => item._id),
+        },
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to save prescription" });
   }
 });
 
