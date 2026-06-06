@@ -20,10 +20,14 @@ async function sendPushToToken(token, title, body, data = {}, withMessage = fals
       token,
       notification: { title, body },
       data,
+      android: { notification: { sound: 'default', channelId: 'default' } },
+      apns: { payload: { aps: { sound: 'default' } } },
     };
   } else {
-    payload.notification = { title, body };
+    payload.notification = { title, body, sound: 'default' };
     payload.data = data;
+    payload.android = { notification: { sound: 'default', channelId: 'default' } };
+    payload.apns = { payload: { aps: { sound: 'default' } } };
   }
 
   try {

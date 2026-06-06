@@ -5,6 +5,14 @@ const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const auth = require('../middleware/auth');
 
+const getIO = () => {
+  try {
+    return require('../index').io;
+  } catch {
+    return null;
+  }
+};
+
 // ✅ Create order from cart
 router.post("/", auth, async (req, res) => {
   try {
@@ -95,6 +103,21 @@ router.patch('/:id/status', async (req, res) => {
       { new: true }
     );
     if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    // Emit real-time delivery update to the patient
+    try {
+      const io = getIO();
+      if (io && order.user) {
+        io.to(String(order.user)).emit('orderDeliveryUpdate', {
+          orderId: String(order._id),
+          status: order.status,
+          userId: String(order.user),
+        });
+      }
+    } catch (emitErr) {
+      console.error('Failed to emit orderDeliveryUpdate:', emitErr.message);
+    }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: 'Failed to update order status', error: err.message });

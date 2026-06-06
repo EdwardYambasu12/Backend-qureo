@@ -576,6 +576,14 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Allow user to join their personal notification room
+  socket.on("joinRoom", (userId) => {
+    if (userId) {
+      socket.join(String(userId));
+      console.log(`🔔 User ${userId} joined personal notification room`);
+    }
+  });
+
   // Forward doctor prescriptions to everyone else in the same consultation room
   socket.on("prescription-from-doctor", ({ room, prescription }) => {
     if (!room || !prescription) return;
@@ -611,4 +619,4 @@ io.on("connection", (socket) => {
 
 
 
-module.exports = { app, server };
+module.exports = { app, server, io };

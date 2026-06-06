@@ -510,6 +510,38 @@ router.post("/:id/comment", async (req, res) => {
     res.status(500).json({ message: "Failed to add comment", error: err.message });
   }
 });
+
+// ✅ Add / update rating
+router.post("/:id/rate", async (req, res) => {
+  try {
+    const { rating } = req.body;
+    const ratingNum = Number(rating);
+
+    if (!Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({ message: "Rating must be a number between 1 and 5" });
+    }
+
+    const doctor = await Doctor.findById(req.params.id);
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    if (!Array.isArray(doctor.ratings)) doctor.ratings = [];
+
+    doctor.ratings.push({ user: "patient", rating: ratingNum, date: new Date() });
+
+    const total = doctor.ratings.reduce((sum, r) => sum + Number(r.rating || 0), 0);
+    doctor.averageRating = Math.round((total / doctor.ratings.length) * 10) / 10;
+
+    await doctor.save();
+
+    res.json({ message: "Rating saved", averageRating: doctor.averageRating });
+  } catch (err) {
+    console.error("❌ Error saving rating:", err);
+    res.status(500).json({ message: "Failed to save rating", error: err.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 

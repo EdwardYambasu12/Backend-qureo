@@ -1,7 +1,9 @@
 const express = require('express');
 const axios = require('axios');
 const multer = require('multer');
+const mongoose = require('mongoose');
 const openai = require('../lib/openai');
+const SymptomChat = require('../models/SymptomChat');
 
 const router = express.Router();
 const uploadImage = multer({
@@ -50,6 +52,80 @@ function logSymptomCheck(entry) {
   // TODO: replace with real DB insert or telemetry event
   console.log('📥 Persisting symptom check log', JSON.stringify(entry));
 }
+
+router.post('/chat/save', async (req, res) => {
+  try {
+    const {
+      sessionId,
+      title,
+      messages,
+      userId,
+      lastSaveTime,
+      metadata,
+    } = req.body || {};
+
+    if (!sessionId || typeof sessionId !== 'string' || !sessionId.trim()) {
+      return res.status(400).json({ message: 'sessionId is required.' });
+    }
+
+    if (!Array.isArray(messages)) {
+      return res.status(400).json({ message: 'messages must be an array.' });
+    }
+
+    const safeMessages = messages
+      .slice(-300)
+      .map((msg) => ({
+        role: msg?.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof msg?.content === 'string' ? msg.content : '',
+        type: typeof msg?.type === 'string' ? msg.type : 'question',
+        options: Array.isArray(msg?.options)
+          ? msg.options.filter((item) => typeof item === 'string').slice(0, 12)
+          : [],
+        selectedOptions: Array.isArray(msg?.selectedOptions)
+          ? msg.selectedOptions.filter((item) => typeof item === 'string').slice(0, 12)
+          : [],
+        imageUrl: typeof msg?.imageUrl === 'string' ? msg.imageUrl : '',
+        triage: msg?.triage ?? null,
+        conditionClusters: msg?.conditionClusters ?? null,
+        actionPlan: msg?.actionPlan ?? null,
+      }));
+
+    const ownerId =
+      userId && mongoose.Types.ObjectId.isValid(String(userId))
+        ? new mongoose.Types.ObjectId(String(userId))
+        : null;
+
+    const query = ownerId
+      ? { user: ownerId, sessionId: sessionId.trim() }
+      : { sessionId: sessionId.trim() };
+
+    const update = {
+      $set: {
+        user: ownerId,
+        title: typeof title === 'string' && title.trim() ? title.trim() : 'Symptom Check Session',
+        messages: safeMessages,
+        lastSaveTime: lastSaveTime ? new Date(lastSaveTime) : new Date(),
+        metadata: metadata && typeof metadata === 'object' ? metadata : {},
+      },
+    };
+
+    const saved = await SymptomChat.findOneAndUpdate(query, update, {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+    });
+
+    return res.json({
+      ok: true,
+      id: saved?._id,
+      updatedAt: saved?.updatedAt,
+      savedCount: Array.isArray(saved?.messages) ? saved.messages.length : 0,
+    });
+  } catch (err) {
+    console.error('❌ /api/gpt/chat/save error:', err?.message || err);
+    return res.status(500).json({ message: 'Failed to save symptom chat.' });
+  }
+});
 
 router.post('/analyze-image', uploadImage.single('image'), async (req, res) => {
   try {

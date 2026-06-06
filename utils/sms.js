@@ -19,4 +19,27 @@ const sendSMS = async (to, message) => {
   }
 };
 
+const toWhatsAppAddress = (to) => {
+  if (!to) return "";
+  return String(to).startsWith("whatsapp:") ? String(to) : `whatsapp:${to}`;
+};
+
+const sendWhatsApp = async (to, message) => {
+  try {
+    if (!to) return;
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER;
+    if (!fromNumber) return;
+
+    await client.messages.create({
+      body: message,
+      from: toWhatsAppAddress(fromNumber),
+      to: toWhatsAppAddress(to),
+    });
+    console.log(`WhatsApp sent to ${to}`);
+  } catch (err) {
+    console.error("WhatsApp Error:", err.message);
+  }
+};
+
+sendSMS.sendWhatsApp = sendWhatsApp;
 module.exports = sendSMS;

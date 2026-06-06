@@ -4,10 +4,64 @@ const Consultation = require("../models/Consultations");
 const Doctor = require("../models/Doctor");
 const Profile = require("../models/Profile");
 const Prescription = require("../models/Prescription");
+const NotificationToken = require("../models/NotificationToken");
 const auth = require("../middleware/auth");
+const doctorAuth = require('../middleware/doctorAuth');
 const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
+const { sendPushToToken } = require("../utils/push");
+
+const STATUS_ACTIVE_FOR_CONFLICT = ["scheduled", "ongoing", "pending", "confirmed"];
+const STATUS_ACTIVE_FOR_REMINDERS = ["scheduled", "ongoing", "confirmed"];
+
+const weekdayKeyForDate = (dateInput) => {
+  const date = new Date(dateInput);
+  return date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+};
+
+const isWithinRange = (dateInput, range) => {
+  const [start, end] = String(range || "").split("-");
+  if (!start || !end) return false;
+
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return false;
+
+  const date = new Date(dateInput);
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  const startMinutes = sh * 60 + sm;
+  const endMinutes = eh * 60 + em;
+  return minutes >= startMinutes && minutes < endMinutes;
+};
+
+const isSlotAvailableFromDoctorSchedule = (doctor, appointmentTime) => {
+  const key = weekdayKeyForDate(appointmentTime);
+  const ranges = doctor?.availability?.[key] || [];
+  return ranges.some((range) => isWithinRange(appointmentTime, range));
+};
+
+const getNotificationTokenByOwnerId = async (ownerId) => {
+  if (!ownerId) return null;
+  try {
+    return await NotificationToken.findOne({ userId: ownerId }).lean();
+  } catch (err) {
+    return null;
+  }
+};
+
+const notifyViaAllChannels = async ({ ownerId, email, phone, subject, text, pushTitle, pushBody, pushData = {} }) => {
+  await Promise.allSettled([
+    sendEmail(email, subject, text),
+    sendSMS(phone, text),
+    sendSMS.sendWhatsApp ? sendSMS.sendWhatsApp(phone, text) : Promise.resolve(false),
+    (async () => {
+      const tokenDoc = await getNotificationTokenByOwnerId(ownerId);
+      if (!tokenDoc?.token) return { skipped: true };
+      return sendPushToToken(tokenDoc.token, pushTitle, pushBody, pushData);
+    })(),
+  ]);
+};
 
 const resolveDurationMinutes = (duration, durationMinutes) => {
   const directDuration = Number(durationMinutes);
@@ -37,7 +91,7 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
         const now = new Date();
         // fetch scheduled consultations that are near (within next 16 minutes) or already due
         const windowAhead = new Date(now.getTime() + 16 * 60 * 1000);
-        const candidates = await Consultation.find({ status: 'scheduled', appointmentTime: { $lte: windowAhead } });
+        const candidates = await Consultation.find({ status: { $in: STATUS_ACTIVE_FOR_REMINDERS }, appointmentTime: { $lte: windowAhead } });
 
         for (const c of candidates) {
           const diffMs = c.appointmentTime.getTime() - now.getTime();
@@ -88,7 +142,7 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
           }
 
           // time to start (or already started)
-          if (diffMs <= 0 && c.status === 'scheduled') {
+          if (diffMs <= 0 && (c.status === 'scheduled' || c.status === 'confirmed')) {
             console.log(`[consultation-check] Consultation ${c._id} is starting now. Updating status -> ongoing`);
             // send start email then mark ongoing
             try {
@@ -137,7 +191,7 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
         try {
           const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
           // find consultations that are still scheduled or ongoing but are at least 2 hours past their appointmentTime
-          const toComplete = await Consultation.find({ status: { $in: ['scheduled', 'ongoing'] }, appointmentTime: { $lte: twoHoursAgo } });
+          const toComplete = await Consultation.find({ status: { $in: ['scheduled', 'ongoing', 'confirmed'] }, appointmentTime: { $lte: twoHoursAgo } });
           for (const tc of toComplete) {
             console.log(`[consultation-check] Consultation ${tc._id} appointment was at ${tc.appointmentTime}. Marking as completed.`);
             await Consultation.findByIdAndUpdate(tc._id, { status: 'completed', updatedAt: new Date() });
@@ -165,24 +219,91 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
   // Create a new consultation
   router.post("/", async (req, res) => {
     try {
-      const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_, duration, durationMinutes } = req.body;
+      const {
+        patient,
+        doctor,
+        mode,
+        consultationType,
+        appointmentTime,
+        reason,
+        patient_,
+        patientEmail,
+        doctor_,
+        duration,
+        durationMinutes,
+        inPersonDetails = {},
+        clinicDetails = {},
+      } = req.body;
+
       const resolvedDurationMinutes = resolveDurationMinutes(duration, durationMinutes);
-      console.log(patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ )
       const roomId = `room-${uuidv4()}`;
+      const isInPerson = mode === "in-person" || consultationType === "in-person";
+
+      if (!patient || !doctor || !appointmentTime || !reason) {
+        return res.status(400).json({ message: "Missing required booking details" });
+      }
+
+      const doctorDoc = await Doctor.findById(doctor).lean();
+      if (!doctorDoc) {
+        return res.status(404).json({ message: "Doctor not found" });
+      }
+
+      if (isInPerson && !isSlotAvailableFromDoctorSchedule(doctorDoc, appointmentTime)) {
+        return res.status(400).json({ message: "Selected slot is outside doctor availability" });
+      }
+
+      const conflict = await Consultation.findOne({
+        doctor,
+        appointmentTime: new Date(appointmentTime),
+        status: { $in: STATUS_ACTIVE_FOR_CONFLICT },
+      }).lean();
+
+      if (conflict) {
+        return res.status(409).json({ message: "Selected slot is already booked" });
+      }
+
+      const createdStatus = isInPerson ? "pending" : "scheduled";
+      const resolvedConsultationType = isInPerson ? "in-person" : "online";
 
       const consultation = await Consultation.create({
         patient,
         doctor,
-        mode,
+        mode: isInPerson ? "in-person" : mode,
+        consultationType: resolvedConsultationType,
         appointmentTime,
         durationMinutes: resolvedDurationMinutes,
         reason,
         roomId,
+        status: createdStatus,
         patientEmail,
         patient_,
-        doctor_
-
+        doctor_,
+        patientName: inPersonDetails.patientName || patient_?.fullName || patient_?.name || "",
+        patientAge: Number.isFinite(Number(inPersonDetails.patientAge)) ? Number(inPersonDetails.patientAge) : null,
+        patientPhone: inPersonDetails.patientPhone || patient_?.phone || "",
+        reasonForVisit: inPersonDetails.reasonForVisit || reason,
+        familyMemberName: inPersonDetails.familyMemberName || "",
+        familyMemberRelation: inPersonDetails.familyMemberRelation || "",
+        reports: Array.isArray(inPersonDetails.reports) ? inPersonDetails.reports : [],
+        clinicDetails: {
+          clinicName: clinicDetails.clinicName || doctorDoc.clinicName || "",
+          address: clinicDetails.address || doctorDoc.city || doctorDoc.clinicName || "",
+        },
       });
+
+      if (isInPerson) {
+        const doctorMessage = `New clinic visit request from ${consultation.patientName || "a patient"} for ${new Date(consultation.appointmentTime).toLocaleString()}.`;
+        await notifyViaAllChannels({
+          ownerId: doctor,
+          email: doctorDoc.email,
+          phone: doctorDoc.phone,
+          subject: "New clinic visit request pending confirmation",
+          text: doctorMessage,
+          pushTitle: "Clinic booking request",
+          pushBody: doctorMessage,
+          pushData: { consultationId: String(consultation._id), status: consultation.status, type: "in_person_pending" },
+        });
+      }
 
       res.status(201).json(consultation);
     } catch (err) {
@@ -196,35 +317,6 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
   await Consultation.deleteMany();
   res.json("deleted every thing")
 })
-// Create a new consultation
-router.post("/", async (req, res) => {
-  try {
-    const { patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_, duration, durationMinutes } = req.body;
-    const resolvedDurationMinutes = resolveDurationMinutes(duration, durationMinutes);
-    console.log(patient, doctor, mode, appointmentTime, reason, patient_, patientEmail, doctor_ )
-    const roomId = `room-${uuidv4()}`;
-
-    const consultation = await Consultation.create({
-      patient,
-      doctor,
-      mode,
-      appointmentTime,
-      durationMinutes: resolvedDurationMinutes,
-      reason,
-      roomId,
-      patientEmail,
-      patient_,
-      doctor_
-
-    });
-
-    res.status(201).json(consultation);
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Failed to create consultation", error: err.message });
-  }
-});
-
 // Get consultations for a doctor (by id) - existing
 router.get("/doctor/:doctorId", async (req, res) => {
   try {
@@ -236,10 +328,12 @@ router.get("/doctor/:doctorId", async (req, res) => {
 });
 
 // Get consultations for the authenticated doctor (protected via doctorAuth)
-const doctorAuth = require('../middleware/doctorAuth');
 router.get('/doctor', doctorAuth, async (req, res) => {
   try {
-    const consultations = await Consultation.find({ doctor: req.doctor._id }).sort({ appointmentTime: 1 });
+    if (!req.doctorId) {
+      return res.status(400).json({ message: 'doctorId is required' });
+    }
+    const consultations = await Consultation.find({ doctor: req.doctorId }).sort({ appointmentTime: 1 });
     res.json(consultations);
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch consultations for doctor', error: err.message });
@@ -264,9 +358,86 @@ router.put("/:id/cancel", auth, async (req, res) => {
       { status: "cancelled", updatedAt: new Date() },
       { new: true }
     );
+    if (!consultation) {
+      return res.status(404).json({ message: "Consultation not found" });
+    }
     res.json(consultation);
   } catch (err) {
     res.status(500).json({ message: "Failed to cancel consultation", error: err.message });
+  }
+});
+
+// Doctor confirms in-person consultation
+router.put('/:id/confirm', doctorAuth, async (req, res) => {
+  try {
+    if (!req.doctorId) {
+      return res.status(400).json({ message: 'doctorId is required' });
+    }
+
+    const consultation = await Consultation.findById(req.params.id);
+    if (!consultation) {
+      return res.status(404).json({ message: 'Consultation not found' });
+    }
+
+    if (String(consultation.doctor) !== String(req.doctorId)) {
+      return res.status(403).json({ message: 'Only assigned doctor can confirm this booking' });
+    }
+
+    if (consultation.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending consultation can be confirmed' });
+    }
+
+    consultation.status = 'confirmed';
+    consultation.confirmedByDoctorId = req.doctorId;
+    consultation.confirmedAt = new Date();
+    consultation.updatedAt = new Date();
+    await consultation.save();
+
+    const patientMessage = `Your clinic visit with ${consultation?.doctor_?.name || 'doctor'} is confirmed for ${new Date(consultation.appointmentTime).toLocaleString()}.`;
+    await notifyViaAllChannels({
+      ownerId: consultation.patient,
+      email: consultation.patientEmail || consultation?.patient_?.email,
+      phone: consultation.patientPhone || consultation?.patient_?.phone,
+      subject: 'Clinic visit confirmed',
+      text: patientMessage,
+      pushTitle: 'Clinic visit confirmed',
+      pushBody: patientMessage,
+      pushData: { consultationId: String(consultation._id), status: consultation.status, type: 'in_person_confirmed' },
+    });
+
+    res.json(consultation);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to confirm consultation', error: err.message });
+  }
+});
+
+// Doctor marks no-show for in-person consultation
+router.put('/:id/no-show', doctorAuth, async (req, res) => {
+  try {
+    if (!req.doctorId) {
+      return res.status(400).json({ message: 'doctorId is required' });
+    }
+
+    const consultation = await Consultation.findById(req.params.id);
+    if (!consultation) {
+      return res.status(404).json({ message: 'Consultation not found' });
+    }
+
+    if (String(consultation.doctor) !== String(req.doctorId)) {
+      return res.status(403).json({ message: 'Only assigned doctor can update this booking' });
+    }
+
+    if (!["pending", "confirmed"].includes(consultation.status)) {
+      return res.status(400).json({ message: 'Only pending or confirmed bookings can be marked no_show' });
+    }
+
+    consultation.status = 'no_show';
+    consultation.updatedAt = new Date();
+    await consultation.save();
+
+    res.json(consultation);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to mark no_show', error: err.message });
   }
 });
 
@@ -274,9 +445,18 @@ router.put("/:id/cancel", auth, async (req, res) => {
 router.put("/:id/reschedule", auth, async (req, res) => {
   try {
     const { appointmentTime } = req.body;
+    const existing = await Consultation.findById(req.params.id).lean();
+    if (!existing) {
+      return res.status(404).json({ message: "Consultation not found" });
+    }
+
+    const nextStatus = existing.consultationType === 'in-person' || existing.mode === 'in-person'
+      ? 'pending'
+      : 'scheduled';
+
     const consultation = await Consultation.findByIdAndUpdate(
       req.params.id,
-      { appointmentTime, status: "scheduled", updatedAt: new Date(), notifiedBefore: false, notifiedStart: false },
+      { appointmentTime, status: nextStatus, updatedAt: new Date(), notifiedBefore: false, notifiedStart: false },
       { new: true }
     );
     res.json(consultation);

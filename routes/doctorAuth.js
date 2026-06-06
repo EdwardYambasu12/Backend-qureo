@@ -7,14 +7,41 @@ const router = express.Router();
 // POST /api/doctor/auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, specialty } = req.body;
+    const {
+      // Step 1
+      name, email, password, specialty, phone, city,
+      // Step 2
+      clinicName, consultationFeeRemote, consultationFeeInPerson,
+      licenseNumber, experience, qualifications,
+      // Step 3
+      availability,
+    } = req.body;
+
     if (!email || !password || !name) return res.status(400).json({ message: 'Missing required fields' });
 
     const existing = await Doctor.findOne({ email });
     if (existing) return res.status(400).json({ message: 'Email already registered' });
 
     const hash = await bcrypt.hash(password, 10);
-    const doctor = await Doctor.create({ name, email, specialty: specialty || 'General Practitioner', passwordHash: hash });
+
+    const doctorData = {
+      name,
+      email,
+      specialty: specialty || 'General Practitioner',
+      passwordHash: hash,
+    };
+
+    if (phone) doctorData.phone = phone;
+    if (city) doctorData.city = city;
+    if (clinicName) doctorData.clinicName = clinicName;
+    if (licenseNumber) doctorData.licenseNumber = licenseNumber;
+    if (Number.isFinite(Number(experience))) doctorData.experience = Number(experience);
+    if (Number.isFinite(Number(consultationFeeRemote))) doctorData.consultationFeeRemote = Number(consultationFeeRemote);
+    if (Number.isFinite(Number(consultationFeeInPerson))) doctorData.consultationFeeInPerson = Number(consultationFeeInPerson);
+    if (Array.isArray(qualifications) && qualifications.length) doctorData.qualifications = qualifications;
+    if (availability && typeof availability === 'object') doctorData.availability = availability;
+
+    const doctor = await Doctor.create(doctorData);
     return res.status(201).json({ message: 'Doctor registered', id: doctor._id });
   } catch (err) {
     console.error('doctor register error', err);
