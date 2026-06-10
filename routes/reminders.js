@@ -3,6 +3,8 @@ const router = express.Router();
 const Medication = require('../models/Medication');
 const HealthAlert = require('../models/HealthAlert');
 const Vitals = require('../models/Vitals');
+const Consultation = require('../models/Consultations');
+const Booking = require('../models/BookingLabtest');
 const Profile = require('../models/Profile');
 const auth = require('../middleware/auth');
 
@@ -137,7 +139,113 @@ router.get('/', auth, async (req, res) => {
       });
     });
 
-    // 3. Sort reminders by time/priority
+    // 3. Appointment follow-up reminders
+    const upcomingConsultations = await Consultation.find({
+      patient: userId,
+      status: { $in: ['scheduled', 'confirmed', 'pending'] },
+      appointmentTime: { $gte: now },
+    })
+      .sort({ appointmentTime: 1 })
+      .limit(3)
+      .lean();
+
+    upcomingConsultations.forEach((consultation) => {
+      const appointmentDate = new Date(consultation.appointmentTime);
+      const minutesUntil = Math.round((appointmentDate.getTime() - now.getTime()) / 60000);
+      reminders.push({
+        id: `appointment-${consultation._id}`,
+        type: 'appointment',
+        title: 'Upcoming follow-up appointment',
+        message: `${consultation.mode || 'Consultation'} on ${appointmentDate.toLocaleString()}`,
+        time: formatTime(appointmentDate),
+        priority: minutesUntil <= 24 * 60 ? 'high' : 'medium',
+        icon: '📅',
+        metadata: {
+          consultationId: consultation._id,
+          status: consultation.status,
+          appointmentTime: consultation.appointmentTime,
+          doctorId: consultation.doctor,
+          roomId: consultation.roomId,
+        },
+        createdAt: consultation.updatedAt || consultation.createdAt || consultation.appointmentTime,
+      });
+    });
+
+    // 4. Lab test follow-up reminders
+    const activeLabBookings = await Booking.find({
+      user: userId,
+      status: { $in: ['sample_collected', 'in_progress', 'pending'] },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(3)
+      .lean();
+
+    activeLabBookings.forEach((booking) => {
+      const testCount = Array.isArray(booking.tests) ? booking.tests.length : 0;
+      reminders.push({
+        id: `lab-${booking._id}`,
+        type: 'lab',
+        title: 'Lab test follow-up',
+        message: `${testCount} test${testCount === 1 ? '' : 's'} currently ${booking.status.replace('_', ' ')}`,
+        priority: booking.status === 'in_progress' ? 'medium' : 'low',
+        icon: '🧪',
+        metadata: {
+          bookingId: booking._id,
+          status: booking.status,
+          preferredDate: booking.preferredDate,
+          testCount,
+        },
+        createdAt: booking.updatedAt || booking.createdAt,
+      });
+    });
+
+    // 5. Vitals check reminders (BP + blood sugar)
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const todaysVitals = await Vitals.find({
+      user: userId,
+      createdAt: { $gte: dayStart, $lte: dayEnd },
+    })
+      .select('bloodPressure bloodSugar createdAt')
+      .lean();
+
+    const bpLoggedToday = todaysVitals.some((v) => Boolean(v?.bloodPressure?.raw || (v?.bloodPressure?.systolic && v?.bloodPressure?.diastolic)));
+    const bloodSugarLoggedToday = todaysVitals.some((v) => typeof v?.bloodSugar?.value === 'number');
+
+    if (!bpLoggedToday) {
+      reminders.push({
+        id: `vitals-bp-${dayStart.toISOString().slice(0, 10)}`,
+        type: 'vitals',
+        title: 'Blood pressure check due',
+        message: 'Log your BP reading today to keep your trend accurate.',
+        priority: 'medium',
+        icon: '🫀',
+        metadata: {
+          vitalType: 'bloodPressure',
+        },
+        createdAt: now,
+      });
+    }
+
+    if (!bloodSugarLoggedToday) {
+      reminders.push({
+        id: `vitals-sugar-${dayStart.toISOString().slice(0, 10)}`,
+        type: 'blood_sugar',
+        title: 'Blood sugar check due',
+        message: 'Add a blood sugar reading to track your glucose trend.',
+        priority: 'medium',
+        icon: '🩸',
+        metadata: {
+          vitalType: 'bloodSugar',
+        },
+        createdAt: now,
+      });
+    }
+
+    // 6. Sort reminders by time/priority
     reminders.sort((a, b) => {
       // Prioritize by priority first
       const priorityOrder = { high: 0, medium: 1, low: 2 };
@@ -159,6 +267,9 @@ router.get('/', auth, async (req, res) => {
       metadata: {
         medicationReminders: reminders.filter(r => r.type === 'medication').length,
         alertReminders: reminders.filter(r => r.type === 'alert').length,
+        appointmentReminders: reminders.filter(r => r.type === 'appointment').length,
+        labReminders: reminders.filter(r => r.type === 'lab').length,
+        vitalsReminders: reminders.filter(r => r.type === 'vitals' || r.type === 'blood_sugar').length,
       },
     });
   } catch (error) {
@@ -253,7 +364,12 @@ router.get('/today', auth, async (req, res) => {
       });
     }
     const todayReminders = [];
+    const additionalReminders = [];
     const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
 
     // Get today's medications
     const medications = await Medication.find({
@@ -300,13 +416,103 @@ router.get('/today', auth, async (req, res) => {
       }
     });
 
+    // Today's consultations as appointment reminders
+    const todaysConsultations = await Consultation.find({
+      patient: userId,
+      status: { $in: ['scheduled', 'confirmed', 'pending', 'ongoing'] },
+      appointmentTime: { $gte: dayStart, $lte: dayEnd },
+    })
+      .sort({ appointmentTime: 1 })
+      .limit(5)
+      .lean();
+
+    todaysConsultations.forEach((consultation) => {
+      const appointmentDate = new Date(consultation.appointmentTime);
+      additionalReminders.push({
+        id: `appointment-${consultation._id}`,
+        type: 'appointment',
+        title: 'Appointment today',
+        message: `${consultation.mode || 'Consultation'} at ${appointmentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        time: formatTime(appointmentDate),
+        priority: consultation.status === 'ongoing' ? 'high' : 'medium',
+        metadata: {
+          consultationId: consultation._id,
+          status: consultation.status,
+          appointmentTime: consultation.appointmentTime,
+        },
+      });
+    });
+
+    // Active lab bookings as follow-up reminders
+    const activeLabBookings = await Booking.find({
+      user: userId,
+      status: { $in: ['sample_collected', 'in_progress', 'pending'] },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(5)
+      .lean();
+
+    activeLabBookings.forEach((booking) => {
+      const testCount = Array.isArray(booking.tests) ? booking.tests.length : 0;
+      additionalReminders.push({
+        id: `lab-${booking._id}`,
+        type: 'lab',
+        title: 'Lab follow-up pending',
+        message: `${testCount} test${testCount === 1 ? '' : 's'} status: ${String(booking.status || '').replace('_', ' ')}`,
+        priority: booking.status === 'in_progress' ? 'medium' : 'low',
+        metadata: {
+          bookingId: booking._id,
+          status: booking.status,
+          testCount,
+        },
+      });
+    });
+
+    // Check if BP and blood sugar are logged today
+    const todaysVitals = await Vitals.find({
+      user: userId,
+      createdAt: { $gte: dayStart, $lte: dayEnd },
+    })
+      .select('bloodPressure bloodSugar')
+      .lean();
+
+    const bpLoggedToday = todaysVitals.some((v) => Boolean(v?.bloodPressure?.raw || (v?.bloodPressure?.systolic && v?.bloodPressure?.diastolic)));
+    const bloodSugarLoggedToday = todaysVitals.some((v) => typeof v?.bloodSugar?.value === 'number');
+
+    if (!bpLoggedToday) {
+      additionalReminders.push({
+        id: `vitals-bp-${dayStart.toISOString().slice(0, 10)}`,
+        type: 'vitals',
+        title: 'Blood pressure check due',
+        message: 'No blood pressure reading logged yet today.',
+        priority: 'medium',
+        metadata: { vitalType: 'bloodPressure' },
+      });
+    }
+
+    if (!bloodSugarLoggedToday) {
+      additionalReminders.push({
+        id: `vitals-sugar-${dayStart.toISOString().slice(0, 10)}`,
+        type: 'blood_sugar',
+        title: 'Blood sugar check due',
+        message: 'No blood sugar reading logged yet today.',
+        priority: 'medium',
+        metadata: { vitalType: 'bloodSugar' },
+      });
+    }
+
     res.json({
       success: true,
       reminders: todayReminders,
       count: todayReminders.length,
+      additionalReminders,
+      totalCount: todayReminders.length + additionalReminders.length,
       summary: {
         totalScheduled: todayReminders.reduce((sum, r) => sum + r.scheduledCount, 0),
         totalTaken: todayReminders.reduce((sum, r) => sum + r.takenCount, 0),
+        appointmentsToday: additionalReminders.filter((r) => r.type === 'appointment').length,
+        activeLabFollowUps: additionalReminders.filter((r) => r.type === 'lab').length,
+        vitalsChecksDue: additionalReminders.filter((r) => r.type === 'vitals' || r.type === 'blood_sugar').length,
       },
     });
   } catch (error) {
@@ -582,6 +788,33 @@ router.get('/statistics', auth, async (req, res) => {
       read: false,
     });
 
+    const abnormalAlerts = await HealthAlert.countDocuments({
+      user: userId,
+      read: false,
+      severity: { $in: ['warning', 'critical'] },
+    });
+
+    const upcomingConsultationsCount = await Consultation.countDocuments({
+      patient: userId,
+      status: { $in: ['scheduled', 'confirmed', 'pending'] },
+      appointmentTime: { $gte: now },
+    });
+
+    const activeLabFollowUpsCount = await Booking.countDocuments({
+      user: userId,
+      status: { $in: ['sample_collected', 'in_progress', 'pending'] },
+    });
+
+    const todaysVitals = await Vitals.find({
+      user: userId,
+      createdAt: { $gte: todayStart, $lte: todayEnd },
+    })
+      .select('bloodPressure bloodSugar')
+      .lean();
+
+    const bpLoggedToday = todaysVitals.some((v) => Boolean(v?.bloodPressure?.raw || (v?.bloodPressure?.systolic && v?.bloodPressure?.diastolic)));
+    const bloodSugarLoggedToday = todaysVitals.some((v) => typeof v?.bloodSugar?.value === 'number');
+
     res.json({
       success: true,
       statistics: {
@@ -593,6 +826,13 @@ router.get('/statistics', auth, async (req, res) => {
         },
         alerts: {
           active: activeAlerts,
+          abnormal: abnormalAlerts,
+        },
+        reminders: {
+          appointmentsUpcoming: upcomingConsultationsCount,
+          labFollowUpsActive: activeLabFollowUpsCount,
+          bloodPressureDue: bpLoggedToday ? 0 : 1,
+          bloodSugarDue: bloodSugarLoggedToday ? 0 : 1,
         },
       },
     });

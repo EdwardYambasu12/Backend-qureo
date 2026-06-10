@@ -33,7 +33,20 @@ const healthPlanSchema = new mongoose.Schema(
         completed: { type: Boolean, default: false },
         completedAt: Date,
       },
+      followUpQuestions: {
+        label: { type: String, default: 'Complete Follow-up Questions' },
+        completed: { type: Boolean, default: false },
+        completedAt: Date,
+      },
     },
+
+    followUpResponses: [
+      {
+        question: { type: String, required: true },
+        answer: { type: String, required: true },
+        answeredAt: { type: Date, default: Date.now },
+      },
+    ],
 
     // Progress tracking
     completionCount: {

@@ -116,6 +116,8 @@ const avg = (items) => {
   return valid.reduce((sum, value) => sum + value, 0) / valid.length;
 };
 
+const hasNumericValue = (value) => typeof value === 'number' && !Number.isNaN(value);
+
 const computeHealthScore = ({ latestVitals, latestAssessment, medicationSummary, alertsSummary, consultationSummary, weekReadings }) => {
   const vitalScore = avg([
     mapHeartRateScore(latestVitals?.heartRate),
@@ -206,7 +208,13 @@ router.get('/dashboard', auth, async (req, res) => {
           heartRate: v.heartRate,
           temperature: v.temperature,
           oxygenLevel: v.oxygenLevel,
+          bloodSugar: hasNumericValue(v.bloodSugar?.value) ? {
+            value: v.bloodSugar.value,
+            unit: v.bloodSugar.unit,
+            readingType: v.bloodSugar.readingType,
+          } : null,
           weight: v.weight,
+          adherenceEventsCount: Array.isArray(v.adherenceEvents) ? v.adherenceEvents.length : 0,
         })),
       },
     };
@@ -263,6 +271,11 @@ router.get('/dashboard', auth, async (req, res) => {
             heartRate: latestVitals.heartRate,
             temperature: latestVitals.temperature,
             oxygenLevel: latestVitals.oxygenLevel,
+            bloodSugar: hasNumericValue(latestVitals.bloodSugar?.value) ? {
+              value: latestVitals.bloodSugar.value,
+              unit: latestVitals.bloodSugar.unit,
+              readingType: latestVitals.bloodSugar.readingType,
+            } : null,
             weight: latestVitals.weight,
           } : null,
           today: vitalStats.today,
@@ -308,7 +321,14 @@ router.get('/vitals', auth, async (req, res) => {
       .limit(parseInt(limit));
 
     // Calculate statistics
-    const validReadings = vitals.filter(v => v.heartRate || v.bloodPressure || v.temperature);
+    const validReadings = vitals.filter(v => (
+      hasNumericValue(v.heartRate) ||
+      Boolean(v.bloodPressure) ||
+      hasNumericValue(v.temperature) ||
+      hasNumericValue(v.oxygenLevel) ||
+      hasNumericValue(v.weight) ||
+      hasNumericValue(v.bloodSugar?.value)
+    ));
     
     const stats = {
       count: validReadings.length,
@@ -341,6 +361,28 @@ router.get('/vitals', auth, async (req, res) => {
           ? Math.round(validReadings.filter(v => v.oxygenLevel).reduce((sum, v) => sum + v.oxygenLevel, 0) / validReadings.filter(v => v.oxygenLevel).length)
           : null,
       },
+      bloodSugar: {
+        readings: validReadings
+          .filter(v => hasNumericValue(v.bloodSugar?.value))
+          .map(v => ({
+            value: v.bloodSugar.value,
+            unit: v.bloodSugar.unit || 'mg/dL',
+            readingType: v.bloodSugar.readingType || 'other',
+            measuredAt: v.bloodSugar.measuredAt || v.createdAt,
+          })),
+        average: (() => {
+          const sugarReadings = validReadings
+            .filter(v => hasNumericValue(v.bloodSugar?.value))
+            .map(v => v.bloodSugar.value);
+          if (!sugarReadings.length) return null;
+          return Math.round(sugarReadings.reduce((sum, reading) => sum + reading, 0) / sugarReadings.length);
+        })(),
+      },
+      adherence: {
+        totalEvents: validReadings.reduce((sum, v) => sum + ((v.adherenceEvents || []).length), 0),
+        takenEvents: validReadings.reduce((sum, v) => sum + ((v.adherenceEvents || []).filter((event) => event.status === 'taken').length), 0),
+        missedEvents: validReadings.reduce((sum, v) => sum + ((v.adherenceEvents || []).filter((event) => event.status === 'missed').length), 0),
+      },
     };
 
     res.json({
@@ -352,7 +394,9 @@ router.get('/vitals', auth, async (req, res) => {
         heartRate: v.heartRate,
         temperature: v.temperature,
         oxygenLevel: v.oxygenLevel,
+        bloodSugar: v.bloodSugar,
         weight: v.weight,
+        adherenceEvents: v.adherenceEvents || [],
         source: v.source,
       })),
       statistics: stats,

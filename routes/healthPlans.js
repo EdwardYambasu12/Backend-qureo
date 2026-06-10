@@ -4,6 +4,24 @@ const HealthPlan = require('../models/HealthPlan');
 const auth = require('../middleware/auth');
 const { startOfDay, endOfDay } = require('date-fns');
 
+const DEFAULT_TASKS = {
+  bp: { label: 'Log Blood Pressure', completed: false },
+  hydration: { label: 'Hydration Check', completed: false },
+  medication: { label: 'Take Medication', completed: false },
+  symptoms: { label: 'Log Symptoms', completed: false },
+  followUpQuestions: { label: 'Complete Follow-up Questions', completed: false },
+};
+
+const getTaskStats = (tasks = {}) => {
+  const totalTasks = Object.keys(tasks).length || 1;
+  const completedCount = Object.values(tasks).filter((task) => task?.completed).length;
+  return {
+    totalTasks,
+    completedCount,
+    completionPercentage: Math.round((completedCount / totalTasks) * 100),
+  };
+};
+
 // GET today's health plan for the user
 router.get('/today', auth, async (req, res) => {
   try {
@@ -25,14 +43,26 @@ router.get('/today', auth, async (req, res) => {
       healthPlan = await HealthPlan.create({
         user: userId,
         planDate: today,
-        tasks: {
-          bp: { label: 'Log Blood Pressure', completed: false },
-          hydration: { label: 'Hydration Check', completed: false },
-          medication: { label: 'Take Medication', completed: false },
-          symptoms: { label: 'Log Symptoms', completed: false },
-        },
+        tasks: DEFAULT_TASKS,
         status: 'pending',
       });
+    } else {
+      // Backfill tasks when schema evolves so older plans stay compatible.
+      let hasUpdates = false;
+      Object.entries(DEFAULT_TASKS).forEach(([taskKey, taskValue]) => {
+        if (!healthPlan.tasks?.[taskKey]) {
+          healthPlan.tasks[taskKey] = taskValue;
+          hasUpdates = true;
+        }
+      });
+
+      if (hasUpdates) {
+        const { totalTasks, completedCount, completionPercentage } = getTaskStats(healthPlan.tasks);
+        healthPlan.completionCount = completedCount;
+        healthPlan.completionPercentage = completionPercentage;
+        healthPlan.status = completedCount === 0 ? 'pending' : (completedCount === totalTasks ? 'completed' : 'in_progress');
+        await healthPlan.save();
+      }
     }
 
     res.json({
@@ -119,7 +149,7 @@ router.post('/:id/complete-task', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user._id;
     const { taskName } = req.body;
-    const validTasks = ['bp', 'hydration', 'medication', 'symptoms'];
+    const validTasks = ['bp', 'hydration', 'medication', 'symptoms', 'followUpQuestions'];
 
     if (!validTasks.includes(taskName)) {
       return res.status(400).json({
@@ -145,14 +175,12 @@ router.post('/:id/complete-task', auth, async (req, res) => {
     healthPlan.tasks[taskName].completedAt = new Date();
 
     // Update completion count
-    const completedCount = Object.values(healthPlan.tasks).filter(
-      (task) => task.completed
-    ).length;
+    const { totalTasks, completedCount, completionPercentage } = getTaskStats(healthPlan.tasks);
     healthPlan.completionCount = completedCount;
-    healthPlan.completionPercentage = (completedCount / 4) * 100;
+    healthPlan.completionPercentage = completionPercentage;
 
     // Update status
-    if (completedCount === 4) {
+    if (completedCount === totalTasks) {
       healthPlan.status = 'completed';
     } else if (completedCount > 0) {
       healthPlan.status = 'in_progress';
@@ -211,14 +239,12 @@ router.post('/:id/update-tasks', auth, async (req, res) => {
     });
 
     // Update completion count
-    const completedCount = Object.values(healthPlan.tasks).filter(
-      (task) => task.completed
-    ).length;
+    const { totalTasks, completedCount, completionPercentage } = getTaskStats(healthPlan.tasks);
     healthPlan.completionCount = completedCount;
-    healthPlan.completionPercentage = (completedCount / 4) * 100;
+    healthPlan.completionPercentage = completionPercentage;
 
     // Update status
-    if (completedCount === 4) {
+    if (completedCount === totalTasks) {
       healthPlan.status = 'completed';
     } else if (completedCount > 0) {
       healthPlan.status = 'in_progress';
@@ -238,6 +264,82 @@ router.post('/:id/update-tasks', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating health plan',
+      error: error.message,
+    });
+  }
+});
+
+// POST submit follow-up question responses for the day
+router.post('/:id/follow-up-responses', auth, async (req, res) => {
+  try {
+    const userId = req.userId || req.user._id;
+    const { responses } = req.body;
+
+    if (!Array.isArray(responses) || responses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'responses must be a non-empty array',
+      });
+    }
+
+    const normalizedResponses = responses
+      .filter((item) => item && item.question && item.answer)
+      .map((item) => ({
+        question: String(item.question).trim(),
+        answer: String(item.answer).trim(),
+        answeredAt: item.answeredAt ? new Date(item.answeredAt) : new Date(),
+      }))
+      .filter((item) => item.question && item.answer);
+
+    if (normalizedResponses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid follow-up responses provided',
+      });
+    }
+
+    const healthPlan = await HealthPlan.findOne({
+      _id: req.params.id,
+      user: userId,
+    });
+
+    if (!healthPlan) {
+      return res.status(404).json({
+        success: false,
+        message: 'Health plan not found',
+      });
+    }
+
+    healthPlan.followUpResponses = normalizedResponses;
+    if (healthPlan.tasks?.followUpQuestions) {
+      healthPlan.tasks.followUpQuestions.completed = true;
+      healthPlan.tasks.followUpQuestions.completedAt = new Date();
+    }
+
+    const { totalTasks, completedCount, completionPercentage } = getTaskStats(healthPlan.tasks);
+    healthPlan.completionCount = completedCount;
+    healthPlan.completionPercentage = completionPercentage;
+
+    if (completedCount === totalTasks) {
+      healthPlan.status = 'completed';
+    } else if (completedCount > 0) {
+      healthPlan.status = 'in_progress';
+    } else {
+      healthPlan.status = 'pending';
+    }
+
+    await healthPlan.save();
+
+    return res.json({
+      success: true,
+      message: 'Follow-up responses saved successfully',
+      healthPlan,
+    });
+  } catch (error) {
+    console.error('Error saving follow-up responses:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error saving follow-up responses',
       error: error.message,
     });
   }

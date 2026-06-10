@@ -5,6 +5,162 @@ const HealthAlert = require('../models/HealthAlert');
 const HealthMonitoringServiceEnhanced = require('../services/HealthMonitoringServiceEnhanced');
 const auth = require('../middleware/auth');
 
+const toDayKey = (date) => new Date(date).toISOString().slice(0, 10);
+
+const getDynamicAiSignal = (vitals = []) => {
+  if (!Array.isArray(vitals) || vitals.length === 0) {
+    return {
+      severity: 'info',
+      insight: 'No readings yet. Add your first vitals to unlock personalized insights.',
+      status: 'Awaiting data',
+      statusDetails: 'Start by logging BP, blood sugar, and medication adherence.',
+      recommendation: 'Log at least one set of vitals today.',
+    };
+  }
+
+  const latest = vitals[vitals.length - 1];
+
+  const latestSys = latest?.bloodPressure?.systolic;
+  const latestDia = latest?.bloodPressure?.diastolic;
+  const latestHr = latest?.heartRate;
+  const latestTemp = latest?.temperature;
+  const latestO2 = latest?.oxygenLevel;
+
+  // Critical immediate checks.
+  if ((latestSys && latestDia && (latestSys >= 180 || latestDia >= 120)) || (latestO2 && latestO2 < 90) || (latestTemp && latestTemp >= 103) || (latestHr && latestHr >= 130)) {
+    return {
+      severity: 'critical',
+      insight: 'Your latest readings show a critical value that needs urgent attention.',
+      status: 'Critical alert',
+      statusDetails: 'Retake the reading now and contact a clinician or emergency services if it stays abnormal.',
+      recommendation: 'Seek immediate medical attention.',
+    };
+  }
+
+  // BP high for 3 consecutive recorded days.
+  const dailyBp = {};
+  vitals.forEach((entry) => {
+    const key = toDayKey(entry.createdAt || Date.now());
+    if (!dailyBp[key]) {
+      dailyBp[key] = { high: false };
+    }
+
+    const sys = entry?.bloodPressure?.systolic;
+    const dia = entry?.bloodPressure?.diastolic;
+    if (typeof sys === 'number' && typeof dia === 'number' && (sys >= 140 || dia >= 90)) {
+      dailyBp[key].high = true;
+    }
+  });
+
+  const dayKeys = Object.keys(dailyBp).sort();
+  const last3Days = dayKeys.slice(-3);
+  const bpHighThreeDays = last3Days.length === 3 && last3Days.every((day) => dailyBp[day].high);
+  if (bpHighThreeDays) {
+    return {
+      severity: 'warning',
+      insight: 'Your blood pressure has been high for 3 days in a row.',
+      status: 'BP trend warning',
+      statusDetails: 'This pattern may require treatment adjustment. Continue logging BP twice daily.',
+      recommendation: 'Schedule a follow-up with your doctor.',
+    };
+  }
+
+  // Missed/Skipped medication adherence events in last 7 days.
+  let missedDoseCount = 0;
+  vitals.forEach((entry) => {
+    (entry.adherenceEvents || []).forEach((event) => {
+      if (event.status === 'missed' || event.status === 'skipped') {
+        missedDoseCount += 1;
+      }
+    });
+  });
+
+  if (missedDoseCount >= 2) {
+    return {
+      severity: 'warning',
+      insight: `You missed medication ${missedDoseCount} times this week.`,
+      status: 'Adherence warning',
+      statusDetails: 'Missed doses can reduce treatment effectiveness. Use reminders and log each dose.',
+      recommendation: 'Talk to your care team if side effects or schedule issues are causing missed doses.',
+    };
+  }
+
+  // Blood sugar trend worsening.
+  const sugars = vitals
+    .filter((entry) => entry?.bloodSugar && typeof entry.bloodSugar.value === 'number')
+    .map((entry) => entry.bloodSugar.value);
+
+  if (sugars.length >= 4) {
+    const firstHalf = sugars.slice(0, Math.floor(sugars.length / 2));
+    const secondHalf = sugars.slice(Math.floor(sugars.length / 2));
+    const avg = (arr) => arr.reduce((sum, value) => sum + value, 0) / arr.length;
+    const delta = avg(secondHalf) - avg(firstHalf);
+    if (delta >= 15) {
+      return {
+        severity: 'warning',
+        insight: 'Your blood sugar trend is rising this week.',
+        status: 'Glucose trend warning',
+        statusDetails: 'Keep checking fasting/post-meal values and review meals, activity, and medications.',
+        recommendation: 'Consider speaking with your clinician for a diabetes follow-up.',
+      };
+    }
+  }
+
+  return {
+    severity: 'info',
+    insight: 'Everything looks stable right now. Keep logging daily to maintain momentum.',
+    status: 'No issues detected',
+    statusDetails: 'Your recent readings do not show critical or warning patterns.',
+    recommendation: 'Continue your current care plan and daily check-ins.',
+  };
+};
+
+const normalizeBloodSugar = (bloodSugar) => {
+  if (bloodSugar === undefined || bloodSugar === null || bloodSugar === '') {
+    return undefined;
+  }
+
+  if (typeof bloodSugar === 'number') {
+    return {
+      value: bloodSugar,
+      unit: 'mg/dL',
+      readingType: 'other',
+      measuredAt: new Date(),
+    };
+  }
+
+  if (typeof bloodSugar === 'object') {
+    if (bloodSugar.value === undefined || bloodSugar.value === null || bloodSugar.value === '') {
+      return undefined;
+    }
+
+    return {
+      value: Number(bloodSugar.value),
+      unit: bloodSugar.unit === 'mmol/L' ? 'mmol/L' : 'mg/dL',
+      readingType: bloodSugar.readingType || 'other',
+      measuredAt: bloodSugar.measuredAt ? new Date(bloodSugar.measuredAt) : new Date(),
+    };
+  }
+
+  return undefined;
+};
+
+const normalizeAdherenceEvents = (adherenceEvents) => {
+  if (!Array.isArray(adherenceEvents)) {
+    return [];
+  }
+
+  return adherenceEvents
+    .filter((event) => event && typeof event === 'object')
+    .map((event) => ({
+      medicationName: event.medicationName || undefined,
+      scheduledTime: event.scheduledTime || undefined,
+      status: event.status || 'taken',
+      notes: event.notes || undefined,
+      recordedAt: event.recordedAt ? new Date(event.recordedAt) : new Date(),
+    }));
+};
+
 // GET /api/vitals - Get all vitals for current user with pagination
 router.get('/', auth, async (req, res) => {
   try {
@@ -50,14 +206,67 @@ router.get('/latest', auth, async (req, res) => {
   }
 });
 
+// GET /api/vitals/ai-signal - Trend-based AI signal for remote monitoring card
+router.get('/ai-signal', auth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentVitals = await Vitals.find({
+      user: userId,
+      createdAt: { $gte: sevenDaysAgo },
+    })
+      .sort({ createdAt: 1 })
+      .select('bloodPressure heartRate temperature oxygenLevel bloodSugar adherenceEvents createdAt');
+
+    const signal = getDynamicAiSignal(recentVitals);
+
+    res.json({
+      success: true,
+      signal,
+      sampleSize: recentVitals.length,
+      windowDays: 7,
+    });
+  } catch (err) {
+    console.error('Error generating AI signal:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 // POST /api/vitals - Create new vitals reading with AI analysis
 router.post('/', auth, async (req, res) => {
   try {
     const userId = req.userId;
-    const { bloodPressure, heartRate, temperature, oxygenLevel, weight, symptoms, hydration, notes, source, deviceName } = req.body;
+    const {
+      bloodPressure,
+      heartRate,
+      temperature,
+      oxygenLevel,
+      bloodSugar,
+      weight,
+      symptoms,
+      adherenceEvents,
+      hydration,
+      notes,
+      source,
+      deviceName,
+    } = req.body;
 
     // Validate required fields
-    if (!heartRate && !bloodPressure && !temperature && !oxygenLevel) {
+    const hasPrimaryReading = [
+      heartRate,
+      bloodPressure,
+      temperature,
+      oxygenLevel,
+      bloodSugar,
+      weight,
+      hydration,
+      Array.isArray(symptoms) ? symptoms.length : 0,
+      Array.isArray(adherenceEvents) ? adherenceEvents.length : 0,
+    ].some((value) => Boolean(value));
+
+    if (!hasPrimaryReading) {
       return res.status(400).json({ message: 'At least one vital measurement is required' });
     }
 
@@ -70,14 +279,19 @@ router.post('/', auth, async (req, res) => {
       bpData = bloodPressure;
     }
 
+    const normalizedBloodSugar = normalizeBloodSugar(bloodSugar);
+    const normalizedAdherenceEvents = normalizeAdherenceEvents(adherenceEvents);
+
     const vitals = new Vitals({
       user: userId,
       bloodPressure: Object.keys(bpData).length > 0 ? bpData : undefined,
       heartRate,
       temperature,
       oxygenLevel,
+      bloodSugar: normalizedBloodSugar,
       weight,
       symptoms: symptoms || [],
+      adherenceEvents: normalizedAdherenceEvents,
       hydration,
       notes,
       source: source || 'manual',
@@ -124,6 +338,7 @@ router.post('/', auth, async (req, res) => {
             hr: vitals.heartRate,
             temp: vitals.temperature,
             o2: vitals.oxygenLevel,
+            glucose: vitals.bloodSugar?.value,
           }
         },
         notificationType: 'in_app',
@@ -223,10 +438,25 @@ router.post('/daily-summary', auth, async (req, res) => {
         .filter(v => v.temperature)
         .reduce((sum, v) => sum + v.temperature, 0) / vitals.filter(v => v.temperature).length;
 
+      const avgBloodSugar = vitals
+        .filter(v => v.bloodSugar && typeof v.bloodSugar.value === 'number')
+        .reduce((sum, v) => sum + v.bloodSugar.value, 0) / vitals.filter(v => v.bloodSugar && typeof v.bloodSugar.value === 'number').length;
+
+      const adherenceSummary = vitals.reduce((acc, v) => {
+        (v.adherenceEvents || []).forEach((event) => {
+          acc.total += 1;
+          if (event.status === 'taken') acc.taken += 1;
+          if (event.status === 'missed') acc.missed += 1;
+        });
+        return acc;
+      }, { total: 0, taken: 0, missed: 0 });
+
       summary.averages = {
         heartRate: avgHeartRate || null,
         oxygenLevel: avgOxygen || null,
         temperature: avgTemp || null,
+        bloodSugar: avgBloodSugar || null,
+        adherence: adherenceSummary,
       };
     }
 
@@ -255,9 +485,30 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     // Update allowed fields
-    const allowedFields = ['bloodPressure', 'heartRate', 'temperature', 'oxygenLevel', 'weight', 'symptoms', 'hydration', 'notes'];
+    const allowedFields = [
+      'bloodPressure',
+      'heartRate',
+      'temperature',
+      'oxygenLevel',
+      'bloodSugar',
+      'weight',
+      'symptoms',
+      'adherenceEvents',
+      'hydration',
+      'notes',
+    ];
     allowedFields.forEach(field => {
       if (updateData[field] !== undefined) {
+        if (field === 'bloodSugar') {
+          vitals[field] = normalizeBloodSugar(updateData[field]);
+          return;
+        }
+
+        if (field === 'adherenceEvents') {
+          vitals[field] = normalizeAdherenceEvents(updateData[field]);
+          return;
+        }
+
         vitals[field] = updateData[field];
       }
     });

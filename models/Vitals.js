@@ -13,6 +13,16 @@ const vitalsSchema = new mongoose.Schema(
     heartRate: { type: Number }, // bpm
     temperature: { type: Number }, // Fahrenheit
     oxygenLevel: { type: Number }, // percentage
+    bloodSugar: {
+      value: { type: Number },
+      unit: { type: String, enum: ['mg/dL', 'mmol/L'], default: 'mg/dL' },
+      readingType: {
+        type: String,
+        enum: ['fasting', 'random', 'postprandial', 'bedtime', 'other'],
+        default: 'other',
+      },
+      measuredAt: { type: Date, default: Date.now },
+    },
     
     // Additional health data
     weight: { type: Number }, // kg
@@ -20,7 +30,22 @@ const vitalsSchema = new mongoose.Schema(
       {
         name: { type: String },
         status: { type: String, enum: ['better', 'improving', 'same', 'worse'] },
+        severity: { type: Number, min: 1, max: 10 },
+        category: { type: String },
         dateLogged: { type: Date, default: Date.now },
+      },
+    ],
+    adherenceEvents: [
+      {
+        medicationName: { type: String },
+        scheduledTime: { type: String },
+        status: {
+          type: String,
+          enum: ['taken', 'missed', 'skipped', 'snoozed'],
+          default: 'taken',
+        },
+        notes: { type: String },
+        recordedAt: { type: Date, default: Date.now },
       },
     ],
     

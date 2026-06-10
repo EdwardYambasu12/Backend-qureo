@@ -46,6 +46,7 @@ const doctorSchema = new mongoose.Schema({
   licenseNumber: { type: String }, // BMDC or License number
   doctorCode: { type: String }, // Unique doctor code (e.g., DT8173)
   clinicName: { type: String }, // Name of clinic/hospital
+  atAGlance: { type: String }, // Short profile highlight text
   
   // Consultation Fees
   consultationFeeRemote: { type: Number, default: 170 }, // Online consultation fee
