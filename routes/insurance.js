@@ -65,6 +65,96 @@ router.get('/subscription', async (req, res) => {
   }
 });
 
+// Get subscription renewal reminders
+router.get('/subscription/reminders', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const subscription = await InsuranceSubscription.findOne({
+      user: userId,
+      status: 'active',
+    }).populate('plan');
+
+    if (!subscription) {
+      return res.json({
+        success: true,
+        reminders: [],
+        renewal: null,
+      });
+    }
+
+    const reminders = [];
+    const now = new Date();
+    const renewalDate = subscription.endDate ? new Date(subscription.endDate) : null;
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysUntilRenewal = renewalDate
+      ? Math.ceil((renewalDate.getTime() - now.getTime()) / msPerDay)
+      : null;
+
+    if (renewalDate && daysUntilRenewal !== null) {
+      if (daysUntilRenewal < 0) {
+        reminders.push({
+          type: 'expired',
+          severity: 'high',
+          title: 'Insurance coverage expired',
+          message: `${subscription.plan?.name || 'Your plan'} expired on ${renewalDate.toLocaleDateString()}. Renew now to avoid coverage gaps.`,
+          cta: 'Renew Plan',
+        });
+      } else if (daysUntilRenewal <= 3) {
+        reminders.push({
+          type: 'renewal_due_soon',
+          severity: 'high',
+          title: 'Renewal due very soon',
+          message: `${subscription.plan?.name || 'Your plan'} renews in ${daysUntilRenewal} day${daysUntilRenewal === 1 ? '' : 's'}.`,
+          cta: 'Review Plan',
+        });
+      } else if (daysUntilRenewal <= 7) {
+        reminders.push({
+          type: 'renewal_due_week',
+          severity: 'medium',
+          title: 'Renewal reminder',
+          message: `${subscription.plan?.name || 'Your plan'} renews in ${daysUntilRenewal} days.`,
+          cta: 'Manage Renewal',
+        });
+      } else if (daysUntilRenewal <= 14) {
+        reminders.push({
+          type: 'renewal_upcoming',
+          severity: 'low',
+          title: 'Upcoming renewal notice',
+          message: `Your insurance renews on ${renewalDate.toLocaleDateString()}.`,
+          cta: 'View Details',
+        });
+      }
+
+      if (!subscription.autoRenew && daysUntilRenewal <= 14) {
+        reminders.push({
+          type: 'auto_renew_disabled',
+          severity: daysUntilRenewal <= 7 ? 'high' : 'medium',
+          title: 'Auto-renew is off',
+          message: 'Turn on auto-renew or prepare manual payment to avoid losing coverage.',
+          cta: 'Enable Auto-renew',
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      reminders,
+      renewal: {
+        renewalDate,
+        daysUntilRenewal,
+        autoRenew: subscription.autoRenew,
+        monthlyPremium: subscription.plan?.monthlyPremium || 0,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // Subscribe to insurance plan
 router.post('/subscribe', async (req, res) => {
   try {
@@ -202,10 +292,15 @@ router.post('/subscription/cancel', async (req, res) => {
 // Update subscription
 router.put('/subscription', async (req, res) => {
   try {
-    const { autoRenew, paymentMethod } = req.body;
+    const { autoRenew, paymentMethod, userId: bodyUserId } = req.body;
+    const userId = req.query.userId || bodyUserId;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
 
     const subscription = await InsuranceSubscription.findOne({
-      user: req.userId,
+      user: userId,
       status: 'active'
     });
 
@@ -213,15 +308,19 @@ router.put('/subscription', async (req, res) => {
       return res.status(404).json({ error: 'No active subscription found' });
     }
 
-    if (autoRenew !== undefined) subscription.autoRenew = autoRenew;
+    if (autoRenew !== undefined) subscription.autoRenew = Boolean(autoRenew);
     if (paymentMethod) subscription.paymentMethod = paymentMethod;
 
     await subscription.save();
 
+    const populatedSubscription = await InsuranceSubscription
+      .findById(subscription._id)
+      .populate('plan');
+
     res.json({
       success: true,
       message: 'Subscription updated successfully',
-      subscription
+      subscription: populatedSubscription
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
