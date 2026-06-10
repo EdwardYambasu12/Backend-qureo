@@ -8,9 +8,62 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const Stripe = require("stripe")
 const Provider = require("../models/Provider")
+const Dependent = require('../models/Dependent');
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+const APPROVED_SERVICE_CATEGORIES = new Set([
+  'consultation',
+  'medicine',
+  'lab_test',
+  'emergency_transport',
+  'follow_up',
+  'insurance_premium',
+]);
+
+const COVERAGE_PRICE_BOOK = {
+  consultation: 35,
+  medicine_refill: 18,
+  lab_test: 60,
+  emergency_transport: 120,
+};
+
+const SOURCE_TO_BUCKET = {
+  wallet_balance: 'walletBalance',
+  mobile_money: 'mobileMoney',
+  card: 'card',
+  bank_transfer: 'bankTransfer',
+  employer_contribution: 'employerSupport',
+  donor_voucher: 'donorVoucher',
+  family_support: 'familySupport',
+};
+
+const ensureWallet = async (userId, session = null) => {
+  const query = Wallet.findOne({ user: userId });
+  if (session) query.session(session);
+
+  let wallet = await query;
+  if (!wallet) {
+    wallet = new Wallet({
+      user: userId,
+      balance: 0,
+      currency: 'USD',
+      reservedFunds: {
+        walletBalance: 0,
+        familySupport: 0,
+        employerSupport: 0,
+        donorVoucher: 0,
+        mobileMoney: 0,
+        card: 0,
+        bankTransfer: 0,
+      },
+    });
+    await wallet.save(session ? { session } : undefined);
+  }
+
+  return wallet;
+};
 // Get wallet balance (POST with userId in body)
 router.get("/list-of-wallets", async (req, res) => {
   try {
@@ -529,6 +582,343 @@ router.post('/transactions/:id', async (req, res) => {
     res.json({ success: true, transaction });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Add funds from explicit healthcare funding sources
+router.post('/funding-source/add', async (req, res) => {
+  try {
+    const { userId, amount, sourceType = 'wallet_balance', sourceLabel = '' } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const normalizedSource = String(sourceType).toLowerCase();
+    const bucketKey = SOURCE_TO_BUCKET[normalizedSource];
+    if (!bucketKey) {
+      return res.status(400).json({ error: 'Unsupported sourceType' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const wallet = await ensureWallet(userId, session);
+      const fundingAmount = Number(amount);
+      const previousBalance = wallet.balance;
+      const newBalance = previousBalance + fundingAmount;
+
+      wallet.balance = newBalance;
+      wallet.totalDeposits += fundingAmount;
+      wallet.lastTransaction = new Date();
+      wallet.reservedFunds[bucketKey] = Number(wallet.reservedFunds[bucketKey] || 0) + fundingAmount;
+
+      await wallet.save({ session });
+
+      const transaction = new Transaction({
+        wallet: wallet._id,
+        user: userId,
+        type: 'care_fund_addition',
+        amount: fundingAmount,
+        previousBalance,
+        newBalance,
+        status: 'completed',
+        paymentMethod: normalizedSource,
+        fundingSource: bucketKey,
+        description: `Added care funds via ${sourceLabel || normalizedSource}`,
+        reference: `FUND-${Date.now()}`,
+        metadata: { sourceType: normalizedSource, sourceLabel },
+        completedAt: new Date(),
+      });
+
+      await transaction.save({ session });
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.json({
+        success: true,
+        message: 'Care funds added successfully',
+        wallet: {
+          balance: wallet.balance,
+          reservedFunds: wallet.reservedFunds,
+        },
+        transactionId: transaction._id,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Add a dependent under wallet owner
+router.post('/dependents/add', async (req, res) => {
+  try {
+    const { userId, fullName, relationship = 'other', dateOfBirth = null } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!fullName || !String(fullName).trim()) return res.status(400).json({ error: 'fullName is required' });
+
+    const dependent = await Dependent.create({
+      owner: userId,
+      fullName: String(fullName).trim(),
+      relationship,
+      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Dependent added successfully',
+      dependent,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/dependents', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const dependents = await Dependent.find({ owner: userId, active: true }).sort({ createdAt: -1 });
+    return res.json({ success: true, dependents });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/dependents/:id', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const dependent = await Dependent.findOneAndUpdate(
+      { _id: req.params.id, owner: userId },
+      { active: false },
+      { new: true }
+    );
+
+    if (!dependent) return res.status(404).json({ error: 'Dependent not found' });
+    return res.json({ success: true, message: 'Dependent removed', dependentId: dependent._id });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Restricted payment endpoint for approved healthcare services only with split funding support
+router.post('/pay-approved-service', async (req, res) => {
+  try {
+    const {
+      userId,
+      providerId,
+      amount,
+      serviceCategory,
+      serviceDetails,
+      dependentId = null,
+      split = {},
+    } = req.body;
+
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!providerId) return res.status(400).json({ error: 'providerId is required' });
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const normalizedCategory = String(serviceCategory || '').toLowerCase();
+    if (!APPROVED_SERVICE_CATEGORIES.has(normalizedCategory)) {
+      return res.status(400).json({
+        error: 'Funds are restricted to approved healthcare services only',
+      });
+    }
+
+    if (dependentId) {
+      const dependent = await Dependent.findOne({ _id: dependentId, owner: userId, active: true });
+      if (!dependent) {
+        return res.status(400).json({ error: 'Dependent is invalid for this wallet owner' });
+      }
+    }
+
+    const provider = await Provider.findById(providerId);
+    if (!provider) return res.status(404).json({ error: 'Provider not found' });
+
+    const totalAmount = Number(amount);
+    const defaultSplit = {
+      walletBalance: totalAmount,
+      familySupport: 0,
+      employerSupport: 0,
+      donorVoucher: 0,
+      insuranceCoverage: 0,
+    };
+
+    const requestedSplit = {
+      ...defaultSplit,
+      ...split,
+    };
+
+    const normalizedSplit = Object.fromEntries(
+      Object.entries(requestedSplit).map(([key, value]) => [key, Math.max(0, Number(value) || 0)])
+    );
+
+    const splitSum = Object.values(normalizedSplit).reduce((sum, value) => sum + value, 0);
+    if (Math.round(splitSum * 100) !== Math.round(totalAmount * 100)) {
+      return res.status(400).json({ error: 'Split allocation must equal total amount' });
+    }
+
+    const walletDebit = normalizedSplit.walletBalance + normalizedSplit.familySupport + normalizedSplit.employerSupport + normalizedSplit.donorVoucher;
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const wallet = await ensureWallet(userId, session);
+      if (wallet.balance < walletDebit) {
+        throw new Error('Insufficient wallet balance for requested split');
+      }
+
+      if (Number(wallet.reservedFunds.familySupport || 0) < normalizedSplit.familySupport) {
+        throw new Error('Insufficient family support funds');
+      }
+      if (Number(wallet.reservedFunds.employerSupport || 0) < normalizedSplit.employerSupport) {
+        throw new Error('Insufficient employer support funds');
+      }
+      if (Number(wallet.reservedFunds.donorVoucher || 0) < normalizedSplit.donorVoucher) {
+        throw new Error('Insufficient donor voucher funds');
+      }
+
+      const previousBalance = wallet.balance;
+      const newBalance = previousBalance - walletDebit;
+
+      wallet.balance = newBalance;
+      wallet.lastTransaction = new Date();
+      wallet.reservedFunds.familySupport = Number(wallet.reservedFunds.familySupport || 0) - normalizedSplit.familySupport;
+      wallet.reservedFunds.employerSupport = Number(wallet.reservedFunds.employerSupport || 0) - normalizedSplit.employerSupport;
+      wallet.reservedFunds.donorVoucher = Number(wallet.reservedFunds.donorVoucher || 0) - normalizedSplit.donorVoucher;
+      wallet.reservedFunds.walletBalance = Math.max(0, Number(wallet.reservedFunds.walletBalance || 0) - normalizedSplit.walletBalance);
+      await wallet.save({ session });
+
+      const providerWallet = await ensureWallet(providerId, session);
+      providerWallet.balance += totalAmount;
+      providerWallet.lastTransaction = new Date();
+      await providerWallet.save({ session });
+
+      const transaction = new Transaction({
+        wallet: wallet._id,
+        user: userId,
+        provider: providerId,
+        dependentId,
+        type: 'approved_healthcare_payment',
+        serviceCategory: normalizedCategory,
+        amount: totalAmount,
+        previousBalance,
+        newBalance,
+        status: 'completed',
+        paymentMethod: 'split',
+        fundingSource: 'mixed',
+        splitAllocation: normalizedSplit,
+        description: serviceDetails || `Payment for ${normalizedCategory}`,
+        reference: `HLPAY-${Date.now()}`,
+        metadata: {
+          serviceDetails,
+          insuranceApplied: normalizedSplit.insuranceCoverage > 0,
+        },
+        completedAt: new Date(),
+      });
+
+      await transaction.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.json({
+        success: true,
+        message: `Payment to ${provider.email || 'provider'} successful`,
+        newBalance,
+        splitAllocation: normalizedSplit,
+        transactionId: transaction._id,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/alerts', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const wallet = await ensureWallet(userId);
+    const isLowBalance = wallet.balance <= Number(wallet.lowBalanceThreshold || 0);
+
+    return res.json({
+      success: true,
+      alerts: {
+        isLowBalance,
+        balance: wallet.balance,
+        threshold: wallet.lowBalanceThreshold,
+        message: isLowBalance ? 'Care wallet balance is low. Add funds to avoid care disruption.' : '',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/coverage-estimate', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const wallet = await ensureWallet(userId);
+    const balance = Number(wallet.balance || 0);
+
+    const estimate = {
+      consultation: Math.floor(balance / COVERAGE_PRICE_BOOK.consultation),
+      medicineRefills: Math.floor(balance / COVERAGE_PRICE_BOOK.medicine_refill),
+      labTests: Math.floor(balance / COVERAGE_PRICE_BOOK.lab_test),
+      emergencyTrips: Math.floor(balance / COVERAGE_PRICE_BOOK.emergency_transport),
+    };
+
+    return res.json({
+      success: true,
+      balance,
+      estimate,
+      referencePricing: COVERAGE_PRICE_BOOK,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/summary', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const wallet = await ensureWallet(userId);
+    const recentTransactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select('type amount serviceCategory splitAllocation createdAt status description');
+
+    const reserved = wallet.reservedFunds || {};
+    const reservedForHealthcare = Object.values(reserved).reduce((sum, value) => sum + Number(value || 0), 0);
+
+    return res.json({
+      success: true,
+      summary: {
+        balance: wallet.balance,
+        reservedForHealthcare,
+        reservedFunds: reserved,
+        recentTransactions,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 });
 

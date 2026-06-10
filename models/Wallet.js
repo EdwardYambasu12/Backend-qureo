@@ -3,8 +3,18 @@ const mongoose = require('mongoose');
 const walletSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.Mixed, ref: 'User', required: true, unique: true },
   balance: { type: Number, default: 0.00 },
+  reservedFunds: {
+    walletBalance: { type: Number, default: 0 },
+    familySupport: { type: Number, default: 0 },
+    employerSupport: { type: Number, default: 0 },
+    donorVoucher: { type: Number, default: 0 },
+    mobileMoney: { type: Number, default: 0 },
+    card: { type: Number, default: 0 },
+    bankTransfer: { type: Number, default: 0 },
+  },
   currency: { type: String, default: 'USD' },
   status: { type: String, default: 'active' },
+  lowBalanceThreshold: { type: Number, default: 25 },
   totalDeposits: { type: Number, default: 0 },
   totalWithdrawals: { type: Number, default: 0 },
   lastTransaction: Date,
