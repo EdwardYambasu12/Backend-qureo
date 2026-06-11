@@ -6,6 +6,7 @@ const Transaction = require('../models/Transaction');
 const HealthcareProvider = require('../models/HealthcareProvider');
 const User = require('../models/User');
 const Profile = require('../models/Profile');
+const InsuranceSubscription = require('../models/InsuranceSubscription');
 const Stripe = require("stripe")
 const Provider = require("../models/Provider")
 const Dependent = require('../models/Dependent');
@@ -21,6 +22,11 @@ const APPROVED_SERVICE_CATEGORIES = new Set([
   'follow_up',
   'insurance_premium',
 ]);
+
+const SERVICE_TYPE_ALIASES = {
+  medicine: 'medicine_refill',
+  follow_up: 'consultation',
+};
 
 const COVERAGE_PRICE_BOOK = {
   consultation: 35,
@@ -38,6 +44,8 @@ const SOURCE_TO_BUCKET = {
   donor_voucher: 'donorVoucher',
   family_support: 'familySupport',
 };
+
+const normalizeVoucherCode = (value) => String(value || '').trim().toUpperCase();
 
 const ensureWallet = async (userId, session = null) => {
   const query = Wallet.findOne({ user: userId });
@@ -588,7 +596,7 @@ router.post('/transactions/:id', async (req, res) => {
 // Add funds from explicit healthcare funding sources
 router.post('/funding-source/add', async (req, res) => {
   try {
-    const { userId, amount, sourceType = 'wallet_balance', sourceLabel = '' } = req.body;
+    const { userId, amount, sourceType = 'wallet_balance', sourceLabel = '', sourceContext = {} } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
@@ -604,6 +612,68 @@ router.post('/funding-source/add', async (req, res) => {
     try {
       const wallet = await ensureWallet(userId, session);
       const fundingAmount = Number(amount);
+
+      let resolvedSourceLabel = sourceLabel || normalizedSource;
+
+      if (normalizedSource === 'family_support') {
+        const dependentId = sourceContext?.dependentId;
+        if (!dependentId) {
+          throw new Error('Family support requires a linked dependent in-app');
+        }
+
+        const dependent = await Dependent.findOne({ _id: dependentId, owner: userId, active: true }).session(session);
+        if (!dependent) {
+          throw new Error('Selected dependent is invalid');
+        }
+        resolvedSourceLabel = `Family support - ${dependent.fullName}`;
+      }
+
+      if (normalizedSource === 'employer_contribution') {
+        const employerProfileId = String(sourceContext?.employerProfileId || '');
+        const employerProfiles = Array.isArray(wallet.fundingProfiles?.employerSupport)
+          ? wallet.fundingProfiles.employerSupport
+          : [];
+        const employerProfile = employerProfiles.find((profile) => String(profile._id) === employerProfileId && profile.active);
+
+        if (!employerProfile) {
+          throw new Error('Employer support requires a saved employer profile');
+        }
+
+        resolvedSourceLabel = `Employer support - ${employerProfile.name}${employerProfile.staffId ? ` (${employerProfile.staffId})` : ''}`;
+      }
+
+      if (normalizedSource === 'donor_voucher') {
+        const voucherCode = normalizeVoucherCode(sourceContext?.voucherCode);
+        if (!voucherCode) {
+          throw new Error('Donor voucher code is required');
+        }
+
+        const vouchers = Array.isArray(wallet.donorVouchers) ? wallet.donorVouchers : [];
+        const voucher = vouchers.find((entry) => normalizeVoucherCode(entry.code) === voucherCode && entry.status === 'active');
+
+        if (!voucher) {
+          throw new Error('Voucher not found or inactive');
+        }
+
+        if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() < Date.now()) {
+          voucher.status = 'expired';
+          await wallet.save({ session });
+          throw new Error('Voucher has expired');
+        }
+
+        if (Number(voucher.amountRemaining || 0) < fundingAmount) {
+          throw new Error('Voucher balance is not enough for this amount');
+        }
+
+        voucher.amountRemaining = Number(voucher.amountRemaining || 0) - fundingAmount;
+        if (voucher.amountRemaining <= 0) {
+          voucher.amountRemaining = 0;
+          voucher.status = 'exhausted';
+        }
+
+        resolvedSourceLabel = `Donor voucher - ${voucher.code}`;
+      }
+
       const previousBalance = wallet.balance;
       const newBalance = previousBalance + fundingAmount;
 
@@ -624,9 +694,9 @@ router.post('/funding-source/add', async (req, res) => {
         status: 'completed',
         paymentMethod: normalizedSource,
         fundingSource: bucketKey,
-        description: `Added care funds via ${sourceLabel || normalizedSource}`,
+        description: `Added care funds via ${resolvedSourceLabel}`,
         reference: `FUND-${Date.now()}`,
-        metadata: { sourceType: normalizedSource, sourceLabel },
+        metadata: { sourceType: normalizedSource, sourceLabel: resolvedSourceLabel, sourceContext },
         completedAt: new Date(),
       });
 
@@ -648,6 +718,89 @@ router.post('/funding-source/add', async (req, res) => {
       session.endSession();
       throw error;
     }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/funding-source/context', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const wallet = await ensureWallet(userId);
+    const dependents = await Dependent.find({ owner: userId, active: true })
+      .sort({ createdAt: -1 })
+      .select('_id fullName relationship');
+
+    const employerProfiles = (wallet.fundingProfiles?.employerSupport || []).filter((profile) => profile.active);
+    const donorVouchers = (wallet.donorVouchers || []).filter((voucher) => voucher.status === 'active');
+
+    return res.json({
+      success: true,
+      context: {
+        dependents,
+        employerProfiles,
+        donorVouchers,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/funding-source/employer/add', async (req, res) => {
+  try {
+    const { userId, name, staffId = '', reference = '' } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Employer name is required' });
+
+    const wallet = await ensureWallet(userId);
+    if (!wallet.fundingProfiles) wallet.fundingProfiles = {};
+    if (!Array.isArray(wallet.fundingProfiles.employerSupport)) wallet.fundingProfiles.employerSupport = [];
+
+    wallet.fundingProfiles.employerSupport.push({
+      name: String(name).trim(),
+      staffId: String(staffId || '').trim(),
+      reference: String(reference || '').trim(),
+      active: true,
+    });
+
+    await wallet.save();
+    const employerProfiles = wallet.fundingProfiles.employerSupport.filter((profile) => profile.active);
+
+    return res.status(201).json({ success: true, employerProfiles });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/funding-source/voucher/add', async (req, res) => {
+  try {
+    const { userId, code, sponsorName = '', amount, expiresAt = null } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!code || !String(code).trim()) return res.status(400).json({ error: 'Voucher code is required' });
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Voucher amount must be positive' });
+
+    const wallet = await ensureWallet(userId);
+    const normalizedCode = normalizeVoucherCode(code);
+    const existingVoucher = (wallet.donorVouchers || []).find((entry) => normalizeVoucherCode(entry.code) === normalizedCode);
+    if (existingVoucher) {
+      return res.status(400).json({ error: 'Voucher code already exists in your wallet' });
+    }
+
+    wallet.donorVouchers.push({
+      code: normalizedCode,
+      sponsorName: String(sponsorName || '').trim(),
+      amountRemaining: Number(amount),
+      status: 'active',
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    });
+
+    await wallet.save();
+
+    const donorVouchers = (wallet.donorVouchers || []).filter((voucher) => voucher.status === 'active');
+    return res.status(201).json({ success: true, donorVouchers });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -742,12 +895,32 @@ router.post('/pay-approved-service', async (req, res) => {
     if (!provider) return res.status(404).json({ error: 'Provider not found' });
 
     const totalAmount = Number(amount);
+
+    const activeSubscription = await InsuranceSubscription.findOne({
+      user: userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
+    }).populate('plan');
+
+    const normalizedServiceType = SERVICE_TYPE_ALIASES[normalizedCategory] || normalizedCategory;
+    const insuranceCoverageEntry = activeSubscription?.plan?.coverageDetails?.find(
+      (coverage) => coverage.serviceType === normalizedServiceType || coverage.serviceType === normalizedCategory
+    ) || null;
+
+    const insuranceCoveredAmount = insuranceCoverageEntry
+      ? Math.min(
+          totalAmount,
+          Math.round((totalAmount * Number(insuranceCoverageEntry.coveragePercentage || 0)) * 100) / 100,
+          Number(insuranceCoverageEntry.limit || totalAmount)
+        )
+      : 0;
+
     const defaultSplit = {
-      walletBalance: totalAmount,
+      walletBalance: Math.max(0, totalAmount - insuranceCoveredAmount),
       familySupport: 0,
       employerSupport: 0,
       donorVoucher: 0,
-      insuranceCoverage: 0,
+      insuranceCoverage: insuranceCoveredAmount,
     };
 
     const requestedSplit = {
@@ -759,12 +932,26 @@ router.post('/pay-approved-service', async (req, res) => {
       Object.entries(requestedSplit).map(([key, value]) => [key, Math.max(0, Number(value) || 0)])
     );
 
+    normalizedSplit.insuranceCoverage = insuranceCoveredAmount;
+
+    const remainingAfterInsurance = Math.max(0, totalAmount - insuranceCoveredAmount);
+    const nonWalletSources = normalizedSplit.familySupport + normalizedSplit.employerSupport + normalizedSplit.donorVoucher;
+    if (nonWalletSources > remainingAfterInsurance) {
+      return res.status(400).json({ error: 'Non-wallet split sources exceed amount remaining after insurance coverage' });
+    }
+
+    normalizedSplit.walletBalance = Math.max(0, remainingAfterInsurance - nonWalletSources);
+
     const splitSum = Object.values(normalizedSplit).reduce((sum, value) => sum + value, 0);
     if (Math.round(splitSum * 100) !== Math.round(totalAmount * 100)) {
       return res.status(400).json({ error: 'Split allocation must equal total amount' });
     }
 
     const walletDebit = normalizedSplit.walletBalance + normalizedSplit.familySupport + normalizedSplit.employerSupport + normalizedSplit.donorVoucher;
+    const totalCovered = normalizedSplit.insuranceCoverage;
+    if (Math.round((walletDebit + totalCovered) * 100) !== Math.round(totalAmount * 100)) {
+      return res.status(400).json({ error: 'Coverage plus wallet split must equal total amount' });
+    }
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -820,6 +1007,9 @@ router.post('/pay-approved-service', async (req, res) => {
         metadata: {
           serviceDetails,
           insuranceApplied: normalizedSplit.insuranceCoverage > 0,
+          insuranceSubscriptionId: activeSubscription?._id || null,
+          insuranceCoverageServiceType: insuranceCoverageEntry?.serviceType || null,
+          insuranceCoveragePercentage: insuranceCoverageEntry?.coveragePercentage || 0,
         },
         completedAt: new Date(),
       });
@@ -834,6 +1024,7 @@ router.post('/pay-approved-service', async (req, res) => {
         message: `Payment to ${provider.email || 'provider'} successful`,
         newBalance,
         splitAllocation: normalizedSplit,
+        insuranceApplied: normalizedSplit.insuranceCoverage > 0,
         transactionId: transaction._id,
       });
     } catch (error) {

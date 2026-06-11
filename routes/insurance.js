@@ -7,6 +7,11 @@ const InsuranceClaim = require('../models/InsuranceClaim');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 
+const SERVICE_TYPE_ALIASES = {
+  medicine: 'medicine_refill',
+  follow_up: 'consultation',
+};
+
 // Get all insurance plans
 router.get('/plans', async (req, res) => {
   try {
@@ -651,9 +656,12 @@ router.get('/coverage', async (req, res) => {
 router.post('/check-coverage', async (req, res) => {
   try {
     const { serviceType, amount } = req.body;
+    const userId = req.body.userId || req.query.userId || req.userId;
+    const normalizedServiceType = SERVICE_TYPE_ALIASES[String(serviceType || '').toLowerCase()] || String(serviceType || '').toLowerCase();
+    const requestedAmount = Number(amount || 0);
 
     const subscription = await InsuranceSubscription.findOne({
-      user: req.userId,
+      user: userId,
       status: 'active'
     }).populate('plan');
 
@@ -664,7 +672,7 @@ router.post('/check-coverage', async (req, res) => {
       });
     }
 
-    const coverage = subscription.plan.coverageDetails.find(c => c.serviceType === serviceType);
+    const coverage = subscription.plan.coverageDetails.find(c => c.serviceType === normalizedServiceType || c.serviceType === String(serviceType || '').toLowerCase());
     
     if (!coverage) {
       return res.json({
@@ -673,13 +681,13 @@ router.post('/check-coverage', async (req, res) => {
       });
     }
 
-    const coveredAmount = amount * (coverage.coveragePercentage / 100);
+    const coveredAmount = requestedAmount * (coverage.coveragePercentage / 100);
 
     res.json({
       covered: true,
       coveragePercentage: coverage.coveragePercentage,
       coveredAmount,
-      yourCost: amount - coveredAmount,
+      yourCost: requestedAmount - coveredAmount,
       limit: coverage.limit
     });
   } catch (error) {

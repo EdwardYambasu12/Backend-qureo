@@ -17,6 +17,23 @@ const walletSchema = new mongoose.Schema({
   lowBalanceThreshold: { type: Number, default: 25 },
   totalDeposits: { type: Number, default: 0 },
   totalWithdrawals: { type: Number, default: 0 },
+  fundingProfiles: {
+    employerSupport: [{
+      name: { type: String, required: true },
+      staffId: { type: String, default: '' },
+      reference: { type: String, default: '' },
+      active: { type: Boolean, default: true },
+      createdAt: { type: Date, default: Date.now },
+    }],
+  },
+  donorVouchers: [{
+    code: { type: String, required: true },
+    sponsorName: { type: String, default: '' },
+    amountRemaining: { type: Number, default: 0 },
+    status: { type: String, enum: ['active', 'exhausted', 'expired'], default: 'active' },
+    expiresAt: { type: Date, default: null },
+    createdAt: { type: Date, default: Date.now },
+  }],
   lastTransaction: Date,
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
