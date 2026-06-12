@@ -26,6 +26,17 @@ const walletSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now },
     }],
   },
+  dependentSupportAllocations: [{
+    dependentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Dependent', required: true },
+    sponsorName: { type: String, default: '' },
+    sponsorPhone: { type: String, default: '' },
+    reference: { type: String, default: '' },
+    availableAmount: { type: Number, default: 0 },
+    allowedServiceCategories: [{ type: String }],
+    active: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+  }],
   donorVouchers: [{
     code: { type: String, required: true },
     sponsorName: { type: String, default: '' },

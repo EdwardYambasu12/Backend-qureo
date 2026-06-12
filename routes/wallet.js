@@ -10,6 +10,7 @@ const InsuranceSubscription = require('../models/InsuranceSubscription');
 const Stripe = require("stripe")
 const Provider = require("../models/Provider")
 const Dependent = require('../models/Dependent');
+const DonorVoucher = require('../models/DonorVoucher');
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -19,6 +20,9 @@ const APPROVED_SERVICE_CATEGORIES = new Set([
   'medicine',
   'lab_test',
   'emergency_transport',
+  'remote_monitoring',
+  'health_records',
+  'preventive_care',
   'follow_up',
   'insurance_premium',
 ]);
@@ -46,6 +50,51 @@ const SOURCE_TO_BUCKET = {
 };
 
 const normalizeVoucherCode = (value) => String(value || '').trim().toUpperCase();
+const normalizeSupportCategories = (categories = []) => {
+  const list = Array.isArray(categories) ? categories : [];
+  const normalized = list
+    .map((category) => String(category || '').toLowerCase().trim())
+    .filter((category) => APPROVED_SERVICE_CATEGORIES.has(category));
+
+  return [...new Set(normalized)];
+};
+
+const PERSONAL_ALLOWANCE_BUCKET_ORDER = [
+  'walletBalance',
+  'mobileMoney',
+  'card',
+  'bankTransfer',
+];
+
+const reserveSponsorAllowanceFunds = (wallet, amount) => {
+  let remaining = Number(amount || 0);
+  const totalAvailable = PERSONAL_ALLOWANCE_BUCKET_ORDER.reduce(
+    (sum, bucket) => sum + Number(wallet.reservedFunds?.[bucket] || 0),
+    0
+  );
+
+  if (totalAvailable < remaining) {
+    return false;
+  }
+
+  PERSONAL_ALLOWANCE_BUCKET_ORDER.forEach((bucket) => {
+    if (remaining <= 0) return;
+    const current = Number(wallet.reservedFunds?.[bucket] || 0);
+    const used = Math.min(current, remaining);
+    wallet.reservedFunds[bucket] = current - used;
+    remaining -= used;
+  });
+
+  wallet.reservedFunds.familySupport = Number(wallet.reservedFunds?.familySupport || 0) + Number(amount || 0);
+  return true;
+};
+
+const isVoucherAdminRequest = (req) => {
+  const configuredKey = process.env.WALLET_VOUCHER_ADMIN_KEY;
+  if (!configuredKey) return false;
+  const requestKey = req.headers['x-voucher-admin-key'] || req.body?.adminKey;
+  return requestKey && String(requestKey) === String(configuredKey);
+};
 
 const ensureWallet = async (userId, session = null) => {
   const query = Wallet.findOne({ user: userId });
@@ -625,6 +674,43 @@ router.post('/funding-source/add', async (req, res) => {
         if (!dependent) {
           throw new Error('Selected dependent is invalid');
         }
+
+        const allowedServiceCategories = normalizeSupportCategories(sourceContext?.allowedServiceCategories);
+        if (allowedServiceCategories.length === 0) {
+          throw new Error('Family support must allow at least one care service category');
+        }
+        const allocationIndex = Array.isArray(wallet.dependentSupportAllocations)
+          ? wallet.dependentSupportAllocations.findIndex(
+              (allocation) => String(allocation.dependentId) === String(dependentId) && allocation.active
+            )
+          : -1;
+
+        const allocationPayload = {
+          dependentId: dependent._id,
+          sponsorName: String(sourceContext?.sponsorName || '').trim(),
+          sponsorPhone: String(sourceContext?.sponsorPhone || '').trim(),
+          reference: String(sourceContext?.reference || '').trim(),
+          availableAmount: fundingAmount,
+          allowedServiceCategories,
+          active: true,
+          updatedAt: new Date(),
+        };
+
+        if (allocationIndex >= 0) {
+          const existingAllocation = wallet.dependentSupportAllocations[allocationIndex];
+          existingAllocation.availableAmount = Number(existingAllocation.availableAmount || 0) + fundingAmount;
+          existingAllocation.sponsorName = allocationPayload.sponsorName || existingAllocation.sponsorName;
+          existingAllocation.sponsorPhone = allocationPayload.sponsorPhone || existingAllocation.sponsorPhone;
+          existingAllocation.reference = allocationPayload.reference || existingAllocation.reference;
+          existingAllocation.allowedServiceCategories = allowedServiceCategories;
+          existingAllocation.updatedAt = new Date();
+        } else {
+          if (!Array.isArray(wallet.dependentSupportAllocations)) {
+            wallet.dependentSupportAllocations = [];
+          }
+          wallet.dependentSupportAllocations.push(allocationPayload);
+        }
+
         resolvedSourceLabel = `Family support - ${dependent.fullName}`;
       }
 
@@ -648,16 +734,20 @@ router.post('/funding-source/add', async (req, res) => {
           throw new Error('Donor voucher code is required');
         }
 
-        const vouchers = Array.isArray(wallet.donorVouchers) ? wallet.donorVouchers : [];
-        const voucher = vouchers.find((entry) => normalizeVoucherCode(entry.code) === voucherCode && entry.status === 'active');
+        const voucher = await DonorVoucher.findOne({
+          code: voucherCode,
+          assignedUser: userId,
+          status: 'active',
+          linkedToWallet: true,
+        }).session(session);
 
         if (!voucher) {
-          throw new Error('Voucher not found or inactive');
+          throw new Error('Voucher not found, not linked, or inactive');
         }
 
         if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() < Date.now()) {
           voucher.status = 'expired';
-          await wallet.save({ session });
+          await voucher.save({ session });
           throw new Error('Voucher has expired');
         }
 
@@ -670,6 +760,8 @@ router.post('/funding-source/add', async (req, res) => {
           voucher.amountRemaining = 0;
           voucher.status = 'exhausted';
         }
+
+        await voucher.save({ session });
 
         resolvedSourceLabel = `Donor voucher - ${voucher.code}`;
       }
@@ -734,14 +826,72 @@ router.get('/funding-source/context', async (req, res) => {
       .select('_id fullName relationship');
 
     const employerProfiles = (wallet.fundingProfiles?.employerSupport || []).filter((profile) => profile.active);
-    const donorVouchers = (wallet.donorVouchers || []).filter((voucher) => voucher.status === 'active');
+    const supportAllocations = (wallet.dependentSupportAllocations || []).filter((allocation) => allocation.active);
+    const donorVouchers = await DonorVoucher.find({
+      assignedUser: userId,
+      status: 'active',
+      linkedToWallet: true,
+    })
+      .sort({ createdAt: -1 })
+      .select('code sponsorName amountRemaining expiresAt');
 
     return res.json({
       success: true,
       context: {
         dependents,
         employerProfiles,
+        supportAllocations,
         donorVouchers,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/funding-source/voucher/issue', async (req, res) => {
+  try {
+    if (!isVoucherAdminRequest(req)) {
+      return res.status(403).json({ error: 'Only authorized admin issuers can create vouchers' });
+    }
+
+    const { recipientUserId, code, sponsorName = '', amount, expiresAt = null, issuedByUserId = null } = req.body;
+    if (!recipientUserId) return res.status(400).json({ error: 'recipientUserId is required' });
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Voucher amount must be positive' });
+
+    const recipient = await User.findById(recipientUserId).select('_id');
+    if (!recipient) return res.status(404).json({ error: 'Recipient user not found' });
+
+    let voucherCode = normalizeVoucherCode(code);
+    if (!voucherCode) {
+      voucherCode = `VCH-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    }
+
+    const existing = await DonorVoucher.findOne({ code: voucherCode });
+    if (existing) {
+      return res.status(400).json({ error: 'Voucher code already exists' });
+    }
+
+    const voucher = await DonorVoucher.create({
+      code: voucherCode,
+      sponsorName: String(sponsorName || '').trim(),
+      assignedUser: recipientUserId,
+      issuedByUserId,
+      totalAmount: Number(amount),
+      amountRemaining: Number(amount),
+      linkedToWallet: false,
+      status: 'active',
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      voucher: {
+        _id: voucher._id,
+        code: voucher.code,
+        sponsorName: voucher.sponsorName,
+        amountRemaining: voucher.amountRemaining,
+        expiresAt: voucher.expiresAt,
       },
     });
   } catch (error) {
@@ -775,31 +925,47 @@ router.post('/funding-source/employer/add', async (req, res) => {
   }
 });
 
-router.post('/funding-source/voucher/add', async (req, res) => {
+router.post('/funding-source/voucher/redeem', async (req, res) => {
   try {
-    const { userId, code, sponsorName = '', amount, expiresAt = null } = req.body;
+    const { userId, code } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
     if (!code || !String(code).trim()) return res.status(400).json({ error: 'Voucher code is required' });
-    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Voucher amount must be positive' });
 
-    const wallet = await ensureWallet(userId);
     const normalizedCode = normalizeVoucherCode(code);
-    const existingVoucher = (wallet.donorVouchers || []).find((entry) => normalizeVoucherCode(entry.code) === normalizedCode);
-    if (existingVoucher) {
-      return res.status(400).json({ error: 'Voucher code already exists in your wallet' });
-    }
-
-    wallet.donorVouchers.push({
+    const voucher = await DonorVoucher.findOne({
       code: normalizedCode,
-      sponsorName: String(sponsorName || '').trim(),
-      amountRemaining: Number(amount),
+      assignedUser: userId,
       status: 'active',
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
     });
 
-    await wallet.save();
+    if (!voucher) {
+      return res.status(404).json({ error: 'Voucher not found for this account' });
+    }
 
-    const donorVouchers = (wallet.donorVouchers || []).filter((voucher) => voucher.status === 'active');
+    if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() < Date.now()) {
+      voucher.status = 'expired';
+      await voucher.save();
+      return res.status(400).json({ error: 'Voucher has expired' });
+    }
+
+    if (Number(voucher.amountRemaining || 0) <= 0) {
+      voucher.status = 'exhausted';
+      voucher.amountRemaining = 0;
+      await voucher.save();
+      return res.status(400).json({ error: 'Voucher is exhausted' });
+    }
+
+    voucher.linkedToWallet = true;
+    await voucher.save();
+
+    const donorVouchers = await DonorVoucher.find({
+      assignedUser: userId,
+      status: 'active',
+      linkedToWallet: true,
+    })
+      .sort({ createdAt: -1 })
+      .select('code sponsorName amountRemaining expiresAt');
+
     return res.status(201).json({ success: true, donorVouchers });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -809,15 +975,30 @@ router.post('/funding-source/voucher/add', async (req, res) => {
 // Add a dependent under wallet owner
 router.post('/dependents/add', async (req, res) => {
   try {
-    const { userId, fullName, relationship = 'other', dateOfBirth = null } = req.body;
+    const { userId, fullName, relationship = 'other', dateOfBirth = null, linkedAccountEmail = '' } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
     if (!fullName || !String(fullName).trim()) return res.status(400).json({ error: 'fullName is required' });
+
+    const normalizedEmail = String(linkedAccountEmail || '').trim().toLowerCase();
+    let linkedUser = null;
+    let linkedAccountStatus = 'unlinked';
+    let careAccessMode = 'sponsor_managed';
+
+    if (normalizedEmail) {
+      linkedUser = await User.findOne({ email: normalizedEmail }).select('_id');
+      linkedAccountStatus = linkedUser ? 'linked' : 'pending';
+      careAccessMode = linkedUser ? 'linked_wallet' : 'sponsor_managed';
+    }
 
     const dependent = await Dependent.create({
       owner: userId,
       fullName: String(fullName).trim(),
       relationship,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+      linkedUser: linkedUser?._id || null,
+      linkedAccountEmail: normalizedEmail,
+      linkedAccountStatus,
+      careAccessMode,
     });
 
     return res.status(201).json({
@@ -835,10 +1016,125 @@ router.get('/dependents', async (req, res) => {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
 
-    const dependents = await Dependent.find({ owner: userId, active: true }).sort({ createdAt: -1 });
+    const dependents = await Dependent.find({ owner: userId, active: true })
+      .sort({ createdAt: -1 })
+      .populate('linkedUser', 'fullName email');
     return res.json({ success: true, dependents });
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/dependents/:id/allowance', async (req, res) => {
+  try {
+    const { userId, amount, allowedServiceCategories = [], reference = '' } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Allowance amount must be greater than zero' });
+
+    const dependent = await Dependent.findOne({ _id: req.params.id, owner: userId, active: true });
+    if (!dependent) return res.status(404).json({ error: 'Dependent not found' });
+
+    const normalizedCategories = normalizeSupportCategories(allowedServiceCategories);
+    if (normalizedCategories.length === 0) {
+      return res.status(400).json({ error: 'Select at least one allowed care category' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const wallet = await ensureWallet(userId, session);
+      const allowanceAmount = Number(amount);
+
+      if (wallet.balance < allowanceAmount) {
+        throw new Error('Insufficient wallet balance to create this allowance');
+      }
+
+      const reserved = reserveSponsorAllowanceFunds(wallet, allowanceAmount);
+      if (!reserved) {
+        throw new Error('Only personal care-wallet funds can be converted into a dependent allowance');
+      }
+
+      const allocationIndex = Array.isArray(wallet.dependentSupportAllocations)
+        ? wallet.dependentSupportAllocations.findIndex(
+            (allocation) => String(allocation.dependentId) === String(dependent._id) && allocation.active
+          )
+        : -1;
+
+      const ownerUser = await User.findById(userId).select('fullName');
+      const sponsorName = String(ownerUser?.fullName || '').trim();
+
+      if (allocationIndex >= 0) {
+        const existingAllocation = wallet.dependentSupportAllocations[allocationIndex];
+        existingAllocation.availableAmount = Number(existingAllocation.availableAmount || 0) + allowanceAmount;
+        existingAllocation.reference = String(reference || existingAllocation.reference || '').trim();
+        existingAllocation.sponsorName = sponsorName || existingAllocation.sponsorName;
+        existingAllocation.allowedServiceCategories = normalizedCategories;
+        existingAllocation.active = true;
+        existingAllocation.updatedAt = new Date();
+      } else {
+        if (!Array.isArray(wallet.dependentSupportAllocations)) {
+          wallet.dependentSupportAllocations = [];
+        }
+        wallet.dependentSupportAllocations.push({
+          dependentId: dependent._id,
+          sponsorName,
+          sponsorPhone: '',
+          reference: String(reference || '').trim(),
+          availableAmount: allowanceAmount,
+          allowedServiceCategories: normalizedCategories,
+          active: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+
+      wallet.lastTransaction = new Date();
+      await wallet.save({ session });
+
+      const transaction = new Transaction({
+        wallet: wallet._id,
+        user: userId,
+        dependentId: dependent._id,
+        type: 'dependent_allowance_allocation',
+        amount: allowanceAmount,
+        previousBalance: wallet.balance,
+        newBalance: wallet.balance,
+        status: 'completed',
+        paymentMethod: 'wallet',
+        fundingSource: 'familySupport',
+        description: `Created care allowance for ${dependent.fullName}`,
+        reference: `ALLOW-${Date.now()}`,
+        metadata: {
+          dependentId: dependent._id,
+          allowedServiceCategories: normalizedCategories,
+          reference: String(reference || '').trim(),
+          careAccessMode: dependent.careAccessMode,
+        },
+        completedAt: new Date(),
+      });
+
+      await transaction.save({ session });
+      await session.commitTransaction();
+      session.endSession();
+
+      const allocation = (wallet.dependentSupportAllocations || []).find(
+        (entry) => String(entry.dependentId) === String(dependent._id) && entry.active
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Dependent care allowance created',
+        allocation,
+        reservedFunds: wallet.reservedFunds,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
 });
 
@@ -965,6 +1261,31 @@ router.post('/pay-approved-service', async (req, res) => {
       if (Number(wallet.reservedFunds.familySupport || 0) < normalizedSplit.familySupport) {
         throw new Error('Insufficient family support funds');
       }
+
+      let appliedDependentSupportAllocation = null;
+      if (normalizedSplit.familySupport > 0) {
+        if (!dependentId) {
+          throw new Error('Family support can only be used for an assigned dependent');
+        }
+
+        appliedDependentSupportAllocation = (wallet.dependentSupportAllocations || []).find(
+          (allocation) => String(allocation.dependentId) === String(dependentId) && allocation.active
+        );
+
+        if (!appliedDependentSupportAllocation) {
+          throw new Error('No active family support allocation exists for this dependent');
+        }
+
+        const allowedCategories = normalizeSupportCategories(appliedDependentSupportAllocation.allowedServiceCategories);
+        if (allowedCategories.length > 0 && !allowedCategories.includes(normalizedCategory)) {
+          throw new Error('This sponsor allocation cannot be used for the selected care service');
+        }
+
+        if (Number(appliedDependentSupportAllocation.availableAmount || 0) < normalizedSplit.familySupport) {
+          throw new Error('Dependent family support allocation is not enough for this payment');
+        }
+      }
+
       if (Number(wallet.reservedFunds.employerSupport || 0) < normalizedSplit.employerSupport) {
         throw new Error('Insufficient employer support funds');
       }
@@ -981,6 +1302,18 @@ router.post('/pay-approved-service', async (req, res) => {
       wallet.reservedFunds.employerSupport = Number(wallet.reservedFunds.employerSupport || 0) - normalizedSplit.employerSupport;
       wallet.reservedFunds.donorVoucher = Number(wallet.reservedFunds.donorVoucher || 0) - normalizedSplit.donorVoucher;
       wallet.reservedFunds.walletBalance = Math.max(0, Number(wallet.reservedFunds.walletBalance || 0) - normalizedSplit.walletBalance);
+
+      if (appliedDependentSupportAllocation) {
+        appliedDependentSupportAllocation.availableAmount = Math.max(
+          0,
+          Number(appliedDependentSupportAllocation.availableAmount || 0) - normalizedSplit.familySupport
+        );
+        if (appliedDependentSupportAllocation.availableAmount === 0) {
+          appliedDependentSupportAllocation.active = false;
+        }
+        appliedDependentSupportAllocation.updatedAt = new Date();
+      }
+
       await wallet.save({ session });
 
       const providerWallet = await ensureWallet(providerId, session);
@@ -1010,6 +1343,12 @@ router.post('/pay-approved-service', async (req, res) => {
           insuranceSubscriptionId: activeSubscription?._id || null,
           insuranceCoverageServiceType: insuranceCoverageEntry?.serviceType || null,
           insuranceCoveragePercentage: insuranceCoverageEntry?.coveragePercentage || 0,
+          dependentSupportAllocation: appliedDependentSupportAllocation
+            ? {
+                dependentId: appliedDependentSupportAllocation.dependentId,
+                allowedServiceCategories: appliedDependentSupportAllocation.allowedServiceCategories || [],
+              }
+            : null,
         },
         completedAt: new Date(),
       });
