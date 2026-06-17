@@ -253,6 +253,10 @@ router.post('/', auth, async (req, res) => {
       deviceName,
     } = req.body;
 
+    const latestVitals = await Vitals.findOne({ user: userId }).sort({ createdAt: -1 });
+
+    const hasField = (field) => Object.prototype.hasOwnProperty.call(req.body, field);
+
     // Validate required fields
     const hasPrimaryReading = [
       heartRate,
@@ -282,18 +286,32 @@ router.post('/', auth, async (req, res) => {
     const normalizedBloodSugar = normalizeBloodSugar(bloodSugar);
     const normalizedAdherenceEvents = normalizeAdherenceEvents(adherenceEvents);
 
+    const mergedBloodPressure = hasField('bloodPressure')
+      ? (Object.keys(bpData).length > 0 ? bpData : undefined)
+      : latestVitals?.bloodPressure;
+
+    const mergedHeartRate = hasField('heartRate') ? heartRate : latestVitals?.heartRate;
+    const mergedTemperature = hasField('temperature') ? temperature : latestVitals?.temperature;
+    const mergedOxygenLevel = hasField('oxygenLevel') ? oxygenLevel : latestVitals?.oxygenLevel;
+    const mergedBloodSugar = hasField('bloodSugar') ? normalizedBloodSugar : latestVitals?.bloodSugar;
+    const mergedWeight = hasField('weight') ? weight : latestVitals?.weight;
+    const mergedHydration = hasField('hydration') ? hydration : latestVitals?.hydration;
+    const mergedSymptoms = hasField('symptoms') ? (symptoms || []) : (latestVitals?.symptoms || []);
+    const mergedAdherenceEvents = hasField('adherenceEvents') ? normalizedAdherenceEvents : (latestVitals?.adherenceEvents || []);
+    const mergedNotes = hasField('notes') ? notes : latestVitals?.notes;
+
     const vitals = new Vitals({
       user: userId,
-      bloodPressure: Object.keys(bpData).length > 0 ? bpData : undefined,
-      heartRate,
-      temperature,
-      oxygenLevel,
-      bloodSugar: normalizedBloodSugar,
-      weight,
-      symptoms: symptoms || [],
-      adherenceEvents: normalizedAdherenceEvents,
-      hydration,
-      notes,
+      bloodPressure: mergedBloodPressure,
+      heartRate: mergedHeartRate,
+      temperature: mergedTemperature,
+      oxygenLevel: mergedOxygenLevel,
+      bloodSugar: mergedBloodSugar,
+      weight: mergedWeight,
+      symptoms: mergedSymptoms,
+      adherenceEvents: mergedAdherenceEvents,
+      hydration: mergedHydration,
+      notes: mergedNotes,
       source: source || 'manual',
       deviceName,
     });
