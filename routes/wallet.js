@@ -1025,6 +1025,45 @@ router.get('/dependents', async (req, res) => {
   }
 });
 
+router.get('/dependents/linked-to-me', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const linkedDependents = await Dependent.find({ linkedUser: userId, active: true })
+      .sort({ createdAt: -1 })
+      .populate('owner', 'fullName email');
+
+    const ownerIds = [...new Set(linkedDependents.map((entry) => String(entry.owner?._id || entry.owner)).filter(Boolean))];
+    const ownerWallets = await Wallet.find({ user: { $in: ownerIds } }).select('user dependentSupportAllocations');
+    const walletByOwner = new Map(ownerWallets.map((wallet) => [String(wallet.user), wallet]));
+
+    const enriched = linkedDependents.map((entry) => {
+      const ownerId = String(entry.owner?._id || entry.owner || '');
+      const ownerWallet = walletByOwner.get(ownerId);
+      const allocation = (ownerWallet?.dependentSupportAllocations || []).find(
+        (item) => String(item.dependentId) === String(entry._id) && item.active
+      );
+
+      return {
+        ...entry.toObject(),
+        allowance: allocation
+          ? {
+              availableAmount: Number(allocation.availableAmount || 0),
+              allowedServiceCategories: allocation.allowedServiceCategories || [],
+              sponsorName: allocation.sponsorName || '',
+              reference: allocation.reference || '',
+            }
+          : null,
+      };
+    });
+
+    return res.json({ success: true, linkedDependents: enriched });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/dependents/:id/allowance', async (req, res) => {
   try {
     const { userId, amount, allowedServiceCategories = [], reference = '' } = req.body;
