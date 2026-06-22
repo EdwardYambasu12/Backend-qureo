@@ -10,6 +10,9 @@ const assessmentSchema = new mongoose.Schema({
   dob: { type: Date },
   gender: { type: String },
   bloodType: { type: String },
+  phone: { type: String },
+  countryCode: { type: String },
+  phoneVerified: { type: Boolean, default: false },
 
   // body metrics
   weightKg: { type: Number },
@@ -26,7 +29,19 @@ const assessmentSchema = new mongoose.Schema({
   medications: { type: [String], default: [] },
   allergy: { type: String },
   condition: { type: String },
+  conditions: { type: [String], default: [] },
+  allergies: { type: String },
+  familyHistory: { type: [String], default: [] },
+  surgeries: { type: String },
+  hospitalizations: { type: String },
   checkupFrequency: { type: String },
+
+  // mobile assessment lifestyle fields
+  exercise: { type: String },
+  smoking: { type: String },
+  alcohol: { type: String },
+  sleep: { type: String },
+  stress: { type: String },
 
   // free text notes, score and raw payload
   notes: { type: String },
