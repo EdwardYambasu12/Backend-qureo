@@ -14,7 +14,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const Transaction = require("./models/Transaction")
 const Wallet = require("./models/Wallet")
-
+const User = require("./models/User")
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
@@ -73,6 +73,37 @@ const HealthAlert = require('./models/HealthAlert');
 // -------------------- Express app --------------------
 const app = express();
 const server = createServer(app);
+const auth = authMiddleware;
+
+app.delete("/api/delete-account", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    await User.findByIdAndDelete(userId);
+
+    return res.json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete account error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete account",
+    });
+  }
+});
+
 
 app.post(
   "/api/wallet/webhook",
