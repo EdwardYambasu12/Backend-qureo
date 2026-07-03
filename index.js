@@ -232,8 +232,11 @@ const allowedOrigins = [
 
 const allowedOriginPatterns = [
   /^https:\/\/([a-z0-9-]+\.)?qureohealth\.com$/i,
-  /^http:\/\/localhost:\d+$/i,
-  /^http:\/\/127\.0\.0\.1:\d+$/i,
+  /^https?:\/\/localhost(:\d+)?$/i,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/i,
+  /^capacitor:\/\/localhost$/i,
+  /^ionic:\/\/localhost$/i,
+  /^http:\/\/10\.0\.2\.2(:\d+)?$/i,
 ];
 
 function isAllowedOrigin(origin) {
