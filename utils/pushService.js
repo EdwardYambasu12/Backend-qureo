@@ -1,7 +1,27 @@
-const { initializeApp, cert } = require('firebase-admin/app');
-const { getMessaging } = require('firebase-admin/messaging');
 const fs = require('fs');
 const path = require('path');
+
+let initializeApp = null;
+let cert = null;
+let getMessaging = null;
+let admin = null;
+
+try {
+  // Firebase Admin v10+ modular API
+  ({ initializeApp, cert } = require('firebase-admin/app'));
+  ({ getMessaging } = require('firebase-admin/messaging'));
+} catch (modularError) {
+  try {
+    // Fallback for older Firebase Admin API
+    admin = require('firebase-admin');
+    initializeApp = admin.initializeApp.bind(admin);
+    cert = (serviceAccount) => admin.credential.cert(serviceAccount);
+    getMessaging = () => admin.messaging();
+    console.warn('[Push Service] Using legacy firebase-admin API fallback');
+  } catch (legacyError) {
+    console.error('[Push Service] firebase-admin is not installed or failed to load:', legacyError?.message || legacyError);
+  }
+}
 
 // Initialize Firebase Admin from service account key
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH;
@@ -14,12 +34,16 @@ try {
     if (!fs.existsSync(resolvedServiceAccountPath)) {
       console.warn(`[Push Service] Service account file not found at: ${resolvedServiceAccountPath}. Push notifications are disabled.`);
     } else {
-      const serviceAccount = require(resolvedServiceAccountPath);
-      firebaseApp = initializeApp({
-        credential: cert(serviceAccount),
-        projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id,
-      });
-      console.log(`[Push Service] Firebase Admin initialized (project: ${process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id || 'unknown'})`);
+      if (!initializeApp || !cert || !getMessaging) {
+        console.warn('[Push Service] Firebase SDK loader is unavailable. Push notifications are disabled.');
+      } else {
+        const serviceAccount = require(resolvedServiceAccountPath);
+        firebaseApp = initializeApp({
+          credential: cert(serviceAccount),
+          projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id,
+        });
+        console.log(`[Push Service] Firebase Admin initialized (project: ${process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id || 'unknown'})`);
+      }
     }
   }
 } catch (err) {
