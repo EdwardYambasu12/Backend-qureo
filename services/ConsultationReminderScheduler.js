@@ -1,6 +1,6 @@
 const Consultation = require('../models/Consultations');
 const NotificationToken = require('../models/NotificationToken');
-const { sendPushToToken } = require('../utils/push');
+const { sendPushToToken } = require('../utils/pushService');
 const sendEmail = require('../utils/email');
 
 /**
@@ -102,15 +102,14 @@ class ConsultationReminderScheduler {
           type,
           consultationId: String(consultation._id),
           roomId,
-          click_action: 'FLUTTER_NOTIFICATION_CLICK', // For Android background open
-        },
-        true // Send as message for in-app + background
+          route: `/call/${roomId}`, // Deep-link to consultation call screen
+        }
       );
 
       if (result.success) {
         this.stats.pushSent += 1;
         console.log(`[consultation-reminder] Push sent to patient ${patientId} (${type})`);
-      } else if (!result.skipped) {
+      } else {
         this.stats.failed += 1;
         console.warn(`[consultation-reminder] Push failed for ${patientId}: ${result.reason}`);
       }

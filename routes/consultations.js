@@ -10,7 +10,7 @@ const doctorAuth = require('../middleware/doctorAuth');
 const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
-const { sendPushToToken } = require("../utils/push");
+const { sendPushToToken } = require("../utils/pushService");
 
 const STATUS_ACTIVE_FOR_CONFLICT = ["scheduled", "ongoing", "pending", "confirmed"];
 const STATUS_ACTIVE_FOR_REMINDERS = ["scheduled", "ongoing", "confirmed"];
@@ -301,7 +301,12 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
           text: doctorMessage,
           pushTitle: "Clinic booking request",
           pushBody: doctorMessage,
-          pushData: { consultationId: String(consultation._id), status: consultation.status, type: "in_person_pending" },
+          pushData: { 
+            consultationId: String(consultation._id), 
+            status: consultation.status, 
+            type: "in_person_pending",
+            route: '/notification', // Links to notifications page for consultation details
+          },
         });
       }
 
@@ -402,7 +407,12 @@ router.put('/:id/confirm', doctorAuth, async (req, res) => {
       text: patientMessage,
       pushTitle: 'Clinic visit confirmed',
       pushBody: patientMessage,
-      pushData: { consultationId: String(consultation._id), status: consultation.status, type: 'in_person_confirmed' },
+      pushData: { 
+        consultationId: String(consultation._id), 
+        status: consultation.status, 
+        type: 'in_person_confirmed',
+        route: '/notification', // Links to notifications page for consultation details
+      },
     });
 
     res.json(consultation);

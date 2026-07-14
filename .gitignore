@@ -5,3 +5,4 @@
 node_modules/"sendgrid.env" 
 node_modules
 .env.example
+setup/firebase-service-account.json

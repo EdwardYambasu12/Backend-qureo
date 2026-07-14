@@ -68,6 +68,7 @@ const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler'
 const ReminderNotificationScheduler = require('./services/ReminderNotificationScheduler');
 const DailyHealthTipScheduler = require('./services/DailyHealthTipScheduler');
 const ConsultationReminderScheduler = require('./services/ConsultationReminderScheduler');
+const TestPushBroadcastScheduler = require('./services/TestPushBroadcastScheduler');
 const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
@@ -370,7 +371,71 @@ app.get('/api/test/consultation-reminder-status', (req, res) => {
   }
 });
 
+app.get('/api/test/push-broadcast-status', (req, res) => {
+  try {
+    const status = TestPushBroadcastScheduler.getStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
+// TEST ENDPOINT: Send a test push notification to the current user (authenticated)
+app.post('/api/test/send-push-to-me', auth, async (req, res) => {
+  try {
+    const userId = req.userId || req.user?.id;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID required' });
+    }
+
+    const { title, body, type, route } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ success: false, message: 'title and body are required' });
+    }
+
+    // Fetch the user's push token
+    const NotificationToken = require('./models/NotificationToken');
+    const tokenDoc = await NotificationToken.findOne({ userId }).lean();
+
+    if (!tokenDoc?.token) {
+      return res.status(404).json({
+        success: false,
+        message: 'No push token registered for this user. Please enable notifications in the app.',
+      });
+    }
+
+    // Send push using the new service
+    const { sendPushToToken } = require('./utils/pushService');
+    const pushData = {
+      type: type || 'test_push',
+      route: route || '/notification',
+      testSent: new Date().toISOString(),
+    };
+
+    const result = await sendPushToToken(tokenDoc.token, title, body, pushData);
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: 'Push notification sent successfully',
+        messageId: result.messageId,
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send push notification',
+        reason: result.reason,
+      });
+    }
+  } catch (error) {
+    console.error('Error sending test push:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while sending push',
+      error: error.message,
+    });
+  }
+});
 
 // -------------------- MongoDB --------------------
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://edwardsyambasu_db_user:bxhuqJ83mhFQG78K@cluster0.nwnbuqt.mongodb.net/?retryWrites=true&w=majority";
@@ -396,6 +461,10 @@ mongoose.connect(MONGO_URI, {
   // Start Consultation Reminder Scheduler after DB connection
   console.log('📞 Initializing Consultation Reminder System...');
   ConsultationReminderScheduler.start();
+
+  // Start Test Push Broadcast Scheduler after DB connection
+  console.log('🧪 Initializing Test Push Broadcast System...');
+  TestPushBroadcastScheduler.start();
 
   // Start the HTTP server only after MongoDB is ready so that
   // no incoming requests are handled before the database is available.

@@ -4,7 +4,7 @@ const User = require('../models/User');
 const NotificationToken = require('../models/NotificationToken');
 const ReminderDispatch = require('../models/ReminderDispatch');
 const sendEmail = require('../utils/email');
-const { sendPushToToken } = require('../utils/push');
+const { sendPushToToken } = require('../utils/pushService');
 
 const buildNotExpiredFilter = (now = new Date()) => ({
   $or: [
@@ -130,6 +130,7 @@ class ReminderNotificationScheduler {
               type: 'medication_reminder',
               medicationId: String(med._id),
               dueTime: timeKey,
+              route: '/health/medications', // Deep-link to medications page
             });
 
             await this.recordDispatch({

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "786036617070",
+    "project_id": "qureo-f0e67",
+    "storage_bucket": "qureo-f0e67.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:786036617070:android:bd64e7d5c72270240f5b7f",
+        "android_client_info": {
+          "package_name": "com.qureohealth.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7n8mtqv5l4p-2_uryeginp0RIIdaesX8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
