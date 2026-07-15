@@ -58,7 +58,9 @@ const NOTIFICATION_TYPE_MAP = {
   in_person_pending: { category: 'doctor_consultations' },
   in_person_confirmed: { category: 'doctor_consultations' },
 
-  medication_reminder: { category: 'pharmacy' },
+  medication_reminder: { category: 'remote_monitoring' },
+  care_plan_step: { category: 'remote_monitoring' },
+  hydration_reminder: { category: 'remote_monitoring' },
   daily_health_tip: { category: 'education' },
 
   wallet_payment_completed: { category: 'health_wallet' },

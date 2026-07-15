@@ -48,6 +48,11 @@ const healthPlanSchema = new mongoose.Schema(
       },
     ],
 
+    notificationState: {
+      lastNotifiedTaskKey: { type: String, default: '' },
+      lastNotifiedAt: { type: Date },
+    },
+
     // Progress tracking
     completionCount: {
       type: Number,

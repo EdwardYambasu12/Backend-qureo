@@ -4,8 +4,10 @@ const Prescription = require('../models/Prescription');
 const Profile = require('../models/Profile');
 const HealthAssessment = require('../models/HealthAssessment');
 const HealthAlert = require('../models/HealthAlert');
+const HealthPlan = require('../models/HealthPlan');
 const User = require('../models/User');
 const NodeCache = require('node-cache');
+const { notifyUser } = require('../utils/notifyUser');
 
 /**
  * HEALTH MONITORING ALGORITHM - ENHANCED WITH OPENAI & SCALABILITY
@@ -118,6 +120,8 @@ class HealthMonitoringService {
       const progressAlerts = await this.analyzeProgressAndCondition(userId, healthRecords, vitals, aiInsights);
       alerts.push(...progressAlerts);
 
+      await this.sendTodayCarePlanPush(userId, { medications, vitals, healthRecords });
+
       // STEP 8: SAVE ALERTS TO DATABASE (BULK OPERATION)
       if (alerts.length > 0) {
         await HealthAlert.insertMany(alerts.map(alert => ({ ...alert, user: userId })));
@@ -216,7 +220,7 @@ class HealthMonitoringService {
   static async fetchLatestVitalsOptimized(userId) {
     try {
       const latestVitals = await Vitals.findOne({ user: userId })
-        .select('bloodPressure heartRate temperature oxygenLevel weight symptoms createdAt')
+        .select('bloodPressure heartRate temperature oxygenLevel weight symptoms hydration createdAt')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -243,6 +247,7 @@ class HealthMonitoringService {
           temp: latestVitals.temperature,
           o2: latestVitals.oxygenLevel,
           weight: latestVitals.weight,
+          hydration: latestVitals.hydration,
           symptoms: latestVitals.symptoms || [],
           timestamp: latestVitals.createdAt,
         },
@@ -687,21 +692,180 @@ Format response as clear, actionable points. Be specific and supportive.`;
    */
   static async sendNotification(userId, alert) {
     try {
-      // Non-blocking notification sending
-      setTimeout(async () => {
-        try {
-          console.log(`📬 Notification sent to user ${userId}:`, alert.title);
-          // TODO: Implement notification services:
-          // - Firebase Cloud Messaging (push)
-          // - SendGrid (email)
-          // - Twilio (SMS)
-          // - In-app notifications
-        } catch (error) {
-          console.error('Error in async notification:', error.message);
-        }
-      }, 0);
+      if (!alert || alert.notificationType !== 'push') {
+        return;
+      }
+
+      await notifyUser({
+        userId,
+        type: alert.type,
+        title: alert.title,
+        body: alert.message,
+        data: {
+          ...alert.data,
+          alertId: alert._id?.toString?.() || undefined,
+        },
+        route: '/care-plan-today',
+        genericTitle: 'You have a new remote monitoring update',
+        genericBody: 'Open Qureo to view your next care plan step.',
+      });
     } catch (error) {
       console.error('Error in sendNotification:', error);
+    }
+  }
+
+  static getTodayRange(referenceDate = new Date()) {
+    const start = new Date(referenceDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(referenceDate);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  static buildCarePlanSteps({ healthPlan, vitals, medications }) {
+    const hydrationMl = Number(vitals?.current?.hydration || 0);
+    const hydrationGoalMl = 2000;
+    const todayBloodPressure = vitals?.current?.bp && vitals?.current?.timestamp && new Date(vitals.current.timestamp).toDateString() === new Date().toDateString();
+    const hasMedication = Array.isArray(medications) && medications.length > 0;
+    const hasSymptomsLogged = Array.isArray(vitals?.current?.symptoms) && vitals.current.symptoms.length > 0;
+    const followUpAnswered = Array.isArray(healthPlan?.followUpResponses) && healthPlan.followUpResponses.length > 0;
+
+    return [
+      {
+        key: 'hydration',
+        label: 'Hydration Check',
+        title: 'Time to drink water',
+        body: `You have logged ${hydrationMl || 0} ml so far today. Aim for about ${hydrationGoalMl} ml to stay on track.`,
+        shouldComplete: hydrationMl >= hydrationGoalMl,
+        shouldNotify: hydrationMl < hydrationGoalMl,
+        type: 'hydration_reminder',
+      },
+      {
+        key: 'bp',
+        label: 'Log Blood Pressure',
+        title: 'Blood pressure check due',
+        body: 'Please log your blood pressure reading for today.',
+        shouldComplete: Boolean(todayBloodPressure),
+        shouldNotify: !todayBloodPressure,
+        type: 'care_plan_step',
+      },
+      {
+        key: 'medication',
+        label: 'Take Medication',
+        title: 'Medication reminder',
+        body: 'Take your prescribed medication as directed.',
+        shouldComplete: !hasMedication,
+        shouldNotify: hasMedication,
+        type: 'medication_reminder',
+      },
+      {
+        key: 'symptoms',
+        label: 'Log Symptoms',
+        title: 'Symptom check-in',
+        body: 'Log any symptoms you are noticing today.',
+        shouldComplete: hasSymptomsLogged,
+        shouldNotify: !hasSymptomsLogged,
+        type: 'care_plan_step',
+      },
+      {
+        key: 'followUpQuestions',
+        label: 'Complete Follow-up Questions',
+        title: 'Follow-up questions ready',
+        body: 'Please complete the daily follow-up questions in Remote Monitoring.',
+        shouldComplete: followUpAnswered,
+        shouldNotify: !followUpAnswered,
+        type: 'care_plan_step',
+      },
+    ];
+  }
+
+  static async sendTodayCarePlanPush(userId, { vitals, medications, healthRecords } = {}) {
+    try {
+      const now = new Date();
+      const { start, end } = this.getTodayRange(now);
+
+      const [healthPlan, latestVitals] = await Promise.all([
+        HealthPlan.findOne({ user: userId, planDate: { $gte: start, $lte: end } }),
+        vitals ? Promise.resolve(vitals) : this.fetchLatestVitalsOptimized(userId),
+      ]);
+
+      let activePlan = healthPlan;
+      if (!activePlan) {
+        activePlan = await HealthPlan.create({
+          user: userId,
+          planDate: now,
+          tasks: {
+            bp: { label: 'Log Blood Pressure', completed: false },
+            hydration: { label: 'Hydration Check', completed: false },
+            medication: { label: 'Take Medication', completed: false },
+            symptoms: { label: 'Log Symptoms', completed: false },
+            followUpQuestions: { label: 'Complete Follow-up Questions', completed: false },
+          },
+          status: 'pending',
+        });
+      }
+
+      const steps = this.buildCarePlanSteps({
+        healthPlan: activePlan,
+        vitals: latestVitals,
+        medications,
+      });
+
+      for (const step of steps) {
+        if (step.shouldComplete && activePlan.tasks?.[step.key] && !activePlan.tasks[step.key].completed) {
+          activePlan.tasks[step.key].completed = true;
+          activePlan.tasks[step.key].completedAt = now;
+        }
+      }
+
+      const nextStep = steps.find((step) => !activePlan.tasks?.[step.key]?.completed && step.shouldNotify);
+      if (!nextStep) {
+        activePlan.notificationState = {
+          lastNotifiedTaskKey: activePlan.notificationState?.lastNotifiedTaskKey || '',
+          lastNotifiedAt: activePlan.notificationState?.lastNotifiedAt || undefined,
+        };
+        await activePlan.save();
+        return { sent: false, reason: 'No pending care plan step' };
+      }
+
+      const lastTaskKey = activePlan.notificationState?.lastNotifiedTaskKey || '';
+      const lastNotifiedAt = activePlan.notificationState?.lastNotifiedAt ? new Date(activePlan.notificationState.lastNotifiedAt) : null;
+      const isSameTask = lastTaskKey === nextStep.key;
+      const isSameDay = lastNotifiedAt ? lastNotifiedAt.toDateString() === now.toDateString() : false;
+
+      if (isSameTask && isSameDay && !activePlan.tasks?.[nextStep.key]?.completed) {
+        return { sent: false, reason: 'Care plan step already notified today', taskKey: nextStep.key };
+      }
+
+      await notifyUser({
+        userId,
+        type: nextStep.type,
+        title: nextStep.title,
+        body: nextStep.body,
+        data: {
+          carePlanKey: nextStep.key,
+          carePlanLabel: nextStep.label,
+          route: '/care-plan-today',
+          hydrationMl: latestVitals?.current?.hydration || 0,
+        },
+        route: '/care-plan-today',
+        balancedTitle: nextStep.title,
+        balancedBody: nextStep.body,
+        genericTitle: 'You have a new care plan step',
+        genericBody: 'Open Qureo to view your next remote monitoring step.',
+      });
+
+      activePlan.notificationState = {
+        lastNotifiedTaskKey: nextStep.key,
+        lastNotifiedAt: now,
+      };
+      await activePlan.save();
+
+      console.log(`📬 Care plan push sent to user ${userId}: ${nextStep.key}`);
+      return { sent: true, taskKey: nextStep.key };
+    } catch (error) {
+      console.error('Error sending care plan push:', error.message);
+      return { sent: false, reason: error.message };
     }
   }
 

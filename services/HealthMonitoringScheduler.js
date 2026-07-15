@@ -1,5 +1,5 @@
 const cron = require('node-cron');
-const HealthMonitoringService = require('./HealthMonitoringService');
+const HealthMonitoringService = require('./HealthMonitoringServiceEnhanced');
 
 /**
  * SCHEDULED HEALTH MONITORING SYSTEM
