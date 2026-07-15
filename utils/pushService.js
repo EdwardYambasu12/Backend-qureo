@@ -27,6 +27,9 @@ try {
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH;
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+const firebaseProjectIdEnv = process.env.FIREBASE_PROJECT_ID;
+const firebaseClientEmailEnv = process.env.FIREBASE_CLIENT_EMAIL;
+const firebasePrivateKeyEnv = process.env.FIREBASE_PRIVATE_KEY;
 let firebaseApp = null;
 let pushInitStatus = {
   initialized: false,
@@ -37,17 +40,48 @@ let pushInitStatus = {
 function normalizeServiceAccount(serviceAccount) {
   if (!serviceAccount || typeof serviceAccount !== 'object') return null;
   const normalized = { ...serviceAccount };
+
+  // Accept either snake_case or camelCase keys from different env sources.
+  normalized.project_id = normalized.project_id || normalized.projectId || firebaseProjectIdEnv;
+  normalized.client_email = normalized.client_email || normalized.clientEmail || firebaseClientEmailEnv;
+  normalized.private_key = normalized.private_key || normalized.privateKey || firebasePrivateKeyEnv;
+
   if (typeof normalized.private_key === 'string') {
     normalized.private_key = normalized.private_key.replace(/\\n/g, '\n');
+  }
+
+  // Mirror back to camelCase for SDKs that read that shape.
+  normalized.projectId = normalized.project_id;
+  normalized.clientEmail = normalized.client_email;
+  normalized.privateKey = normalized.private_key;
+
+  if (!normalized.project_id || !normalized.client_email || !normalized.private_key) {
+    return null;
   }
   return normalized;
 }
 
 function parseServiceAccountFromEnv() {
+  if (firebaseProjectIdEnv && firebaseClientEmailEnv && firebasePrivateKeyEnv) {
+    const parsed = normalizeServiceAccount({
+      project_id: firebaseProjectIdEnv,
+      client_email: firebaseClientEmailEnv,
+      private_key: firebasePrivateKeyEnv,
+    });
+    if (parsed) {
+      return { source: 'split_env', serviceAccount: parsed };
+    }
+  }
+
   if (serviceAccountJson) {
     try {
       const parsed = JSON.parse(serviceAccountJson);
-      return { source: 'env_json', serviceAccount: normalizeServiceAccount(parsed) };
+      const normalized = normalizeServiceAccount(parsed);
+      if (!normalized) {
+        pushInitStatus.reason = 'FIREBASE_SERVICE_ACCOUNT_JSON missing project/client/private key fields';
+      } else {
+        return { source: 'env_json', serviceAccount: normalized };
+      }
     } catch (error) {
       console.error('[Push Service] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:', error.message);
       pushInitStatus.reason = 'Invalid FIREBASE_SERVICE_ACCOUNT_JSON';
@@ -58,7 +92,12 @@ function parseServiceAccountFromEnv() {
     try {
       const decoded = Buffer.from(serviceAccountBase64, 'base64').toString('utf8');
       const parsed = JSON.parse(decoded);
-      return { source: 'env_base64', serviceAccount: normalizeServiceAccount(parsed) };
+      const normalized = normalizeServiceAccount(parsed);
+      if (!normalized) {
+        pushInitStatus.reason = 'FIREBASE_SERVICE_ACCOUNT_BASE64 missing project/client/private key fields';
+      } else {
+        return { source: 'env_base64', serviceAccount: normalized };
+      }
     } catch (error) {
       console.error('[Push Service] Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:', error.message);
       pushInitStatus.reason = 'Invalid FIREBASE_SERVICE_ACCOUNT_BASE64';
@@ -75,7 +114,12 @@ function parseServiceAccountFromEnv() {
 
     try {
       const parsed = require(resolvedServiceAccountPath);
-      return { source: 'file_path', serviceAccount: normalizeServiceAccount(parsed) };
+      const normalized = normalizeServiceAccount(parsed);
+      if (!normalized) {
+        pushInitStatus.reason = 'FIREBASE_SERVICE_ACCOUNT_KEY_PATH missing project/client/private key fields';
+      } else {
+        return { source: 'file_path', serviceAccount: normalized };
+      }
     } catch (error) {
       console.error('[Push Service] Failed to read service account file:', error.message);
       pushInitStatus.reason = 'Unable to read FIREBASE_SERVICE_ACCOUNT_KEY_PATH JSON';
