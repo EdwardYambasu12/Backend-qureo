@@ -11,8 +11,7 @@ const Stripe = require("stripe")
 const Provider = require("../models/Provider")
 const Dependent = require('../models/Dependent');
 const DonorVoucher = require('../models/DonorVoucher');
-const NotificationToken = require('../models/NotificationToken');
-const { sendPushToToken } = require('../utils/pushService');
+const { notifyUser } = require('../utils/notifyUser');
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -609,22 +608,23 @@ router.post('/pay-provider', async (req, res) => {
 
       // Non-blocking push notification to payer
       try {
-        const tokenDoc = await NotificationToken.findOne({ userId }).lean();
-        if (tokenDoc?.token) {
-          const providerName = provider?.name || provider?.email || 'provider';
-          await sendPushToToken(
-            tokenDoc.token,
-            'Wallet payment successful',
-            `You paid $${Number(amount).toFixed(2)} to ${providerName}.`,
-            {
-              type: 'wallet_payment_completed',
-              route: '/health-wallet',
-              transactionId: String(transaction._id),
-              providerId: String(providerId),
-              amount: String(Number(amount).toFixed(2)),
-            }
-          );
-        }
+        const providerName = provider?.name || provider?.email || 'provider';
+        await notifyUser({
+          userId,
+          type: 'wallet_payment_completed',
+          title: 'Payment completed',
+          body: `You paid $${Number(amount).toFixed(2)} to ${providerName}.`,
+          balancedTitle: 'Payment completed',
+          balancedBody: 'Your wallet payment was completed successfully.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to view your wallet update.',
+          route: '/health-wallet',
+          data: {
+            transactionId: String(transaction._id),
+            providerId: String(providerId),
+            amount: String(Number(amount).toFixed(2)),
+          },
+        });
       } catch (notifyError) {
         console.warn('[wallet] push notification failed after payment:', notifyError?.message || notifyError);
       }

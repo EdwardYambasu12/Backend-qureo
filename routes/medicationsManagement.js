@@ -120,6 +120,7 @@ router.post('/', auth, async (req, res) => {
       frequency,
       scheduledTimes,
       prescribedBy,
+      timezone,
       startDate,
       endDate,
       reason,
@@ -148,6 +149,7 @@ router.post('/', auth, async (req, res) => {
         takenAt: null,
       })),
       prescribedBy,
+      timezone: typeof timezone === 'string' && timezone.trim() ? timezone.trim() : 'UTC',
       startDate: new Date(startDate),
       endDate: normalizeEndDate(endDate),
       reason,
@@ -186,6 +188,11 @@ router.patch('/:id', auth, async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(updateData, 'endDate')) {
       updateData.endDate = normalizeEndDate(updateData.endDate);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updateData, 'timezone')) {
+      const tz = String(updateData.timezone || '').trim();
+      updateData.timezone = tz || 'UTC';
     }
 
     const medication = await Medication.findOneAndUpdate(

@@ -43,6 +43,16 @@ const profileSchema = new mongoose.Schema({
     insights: { type: Boolean, default: false },
     push: { type: Boolean, default: true },
     email: { type: Boolean, default: false },
+    privacyMode: {
+      type: String,
+      enum: ['maximum_privacy', 'balanced', 'detailed'],
+      default: 'balanced',
+    },
+    categoryPreferences: {
+      type: Map,
+      of: Boolean,
+      default: {},
+    },
   },
 
   // units & metrics preferences

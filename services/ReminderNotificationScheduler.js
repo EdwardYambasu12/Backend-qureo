@@ -14,6 +14,35 @@ const buildNotExpiredFilter = (now = new Date()) => ({
   ],
 });
 
+const formatDateKeyInTimezone = (date, timezone) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+};
+
+const formatTimeKeyInTimezone = (date, timezone) => {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const hour = parts.find((p) => p.type === 'hour')?.value;
+  const minute = parts.find((p) => p.type === 'minute')?.value;
+  return `${hour}:${minute}`;
+};
+
 class ReminderNotificationScheduler {
   constructor() {
     this.interval = null;
@@ -44,6 +73,16 @@ class ReminderNotificationScheduler {
   isDoseSkippedToday(dose, now) {
     if (!dose?.skippedAt) return false;
     return new Date(dose.skippedAt).toDateString() === now.toDateString();
+  }
+
+  isDoseTakenTodayInTimezone(dose, now, timezone) {
+    if (!dose?.taken || !dose?.takenAt) return false;
+    return formatDateKeyInTimezone(new Date(dose.takenAt), timezone) === formatDateKeyInTimezone(now, timezone);
+  }
+
+  isDoseSkippedTodayInTimezone(dose, now, timezone) {
+    if (!dose?.skippedAt) return false;
+    return formatDateKeyInTimezone(new Date(dose.skippedAt), timezone) === formatDateKeyInTimezone(now, timezone);
   }
 
   getDoseReminderTime(dose, now) {
@@ -87,13 +126,14 @@ class ReminderNotificationScheduler {
 
   async processDueReminders() {
     const now = new Date();
-    const timeKey = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const dateKey = this.getDateKey(now);
 
     const medications = await Medication.find({ isActive: true, remindMe: true, ...buildNotExpiredFilter(now) }).lean();
     if (!medications.length) return;
 
     for (const med of medications) {
+      const timezone = med?.timezone || 'UTC';
+      const timeKey = formatTimeKeyInTimezone(now, timezone);
+      const dateKey = formatDateKeyInTimezone(now, timezone);
       const userId = String(med.user);
       const dueDoses = (med.scheduledTimes || []).filter((dose) => this.getDoseReminderTime(dose, now) === timeKey);
       if (!dueDoses.length) continue;
@@ -110,8 +150,8 @@ class ReminderNotificationScheduler {
       const tokenDoc = await NotificationToken.findOne({ userId }).lean();
 
       for (const dose of dueDoses) {
-        if (this.isDoseTakenToday(dose, now)) continue;
-        if (this.isDoseSkippedToday(dose, now)) continue;
+        if (this.isDoseTakenTodayInTimezone(dose, now, timezone)) continue;
+        if (this.isDoseSkippedTodayInTimezone(dose, now, timezone)) continue;
 
         const title = `Medication Reminder: ${med.name}`;
         const body = `${med.dosage} • ${med.frequency} • Due now (${timeKey})`;

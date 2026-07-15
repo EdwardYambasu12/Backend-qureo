@@ -2,8 +2,7 @@ const express = require("express");
 
 const Booking = require("../models/BookingLabtest.js");
 const LabTest = require("../models/LabTest.js");
-const NotificationToken = require('../models/NotificationToken');
-const { sendPushToToken } = require('../utils/pushService');
+const { notifyUser } = require('../utils/notifyUser');
 const router = express.Router();
 
 
@@ -103,20 +102,21 @@ router.put("/:id/status", async (req, res) => {
     // Non-blocking push to booking owner on status update
     try {
       if (booking?.user) {
-        const tokenDoc = await NotificationToken.findOne({ userId: booking.user }).lean();
-        if (tokenDoc?.token) {
-          await sendPushToToken(
-            tokenDoc.token,
-            'Lab booking status updated',
-            `Your lab booking status is now "${status}".`,
-            {
-              type: 'lab_booking_status_updated',
-              route: '/notification',
-              bookingId: String(booking._id),
-              status: String(status || ''),
-            }
-          );
-        }
+        await notifyUser({
+          userId: booking.user,
+          type: 'lab_booking_status_updated',
+          title: 'Lab booking status updated',
+          body: `Your lab booking status is now "${status}".`,
+          balancedTitle: 'Lab booking updated',
+          balancedBody: 'Your lab booking status has changed.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to view your latest lab update.',
+          route: '/notification',
+          data: {
+            bookingId: String(booking._id),
+            status: String(status || ''),
+          },
+        });
       }
     } catch (notifyError) {
       console.warn('[lab-bookings] push failed on booking status update:', notifyError?.message || notifyError);
@@ -181,21 +181,22 @@ router.put("/:bookingId/test/:testId/result", async (req, res) => {
 
     // Non-blocking push to booking owner when result status changes
     try {
-      const tokenDoc = await NotificationToken.findOne({ userId: booking.user?._id || booking.user }).lean();
-      if (tokenDoc?.token) {
-        await sendPushToToken(
-          tokenDoc.token,
-          'Lab result status updated',
-          `Result for ${test.name || 'your lab test'} is now "${test.status}".`,
-          {
-            type: 'lab_result_status_updated',
-            route: '/notification',
-            bookingId: String(booking._id),
-            testId: String(test._id),
-            status: String(test.status || ''),
-          }
-        );
-      }
+      await notifyUser({
+        userId: booking.user?._id || booking.user,
+        type: 'lab_result_status_updated',
+        title: 'Results are available',
+        body: `Result for ${test.name || 'your lab test'} is now "${test.status}".`,
+        balancedTitle: 'Lab result update',
+        balancedBody: 'A lab test result has been updated.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your latest lab update.',
+        route: '/notification',
+        data: {
+          bookingId: String(booking._id),
+          testId: String(test._id),
+          status: String(test.status || ''),
+        },
+      });
     } catch (notifyError) {
       console.warn('[lab-bookings] push failed on result update:', notifyError?.message || notifyError);
     }

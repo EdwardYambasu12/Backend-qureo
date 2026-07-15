@@ -22,6 +22,7 @@ const medicationSchema = new mongoose.Schema(
 
     // Medication metadata
     prescribedBy: String,                                // Doctor's name
+    timezone: { type: String, default: 'UTC' },         // IANA timezone, e.g., "Africa/Freetown"
     startDate: { type: Date, required: true },
     endDate: Date,                                       // If medication has end date
     reason: String,                                      // e.g., "Hypertension", "Cold"
