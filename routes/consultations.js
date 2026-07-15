@@ -113,6 +113,29 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
               console.error('[consultation-check] Failed to send pre-start email:', errEmail);
             }
 
+            try {
+              const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
+              const pushMessage = `Your consultation with ${doctorName} starts in ${Math.max(diffMinutes, 1)} minutes. Please get ready.`;
+              await notifyViaAllChannels({
+                ownerId: c.patient,
+                email: c.patientEmail || c.patient_?.email,
+                phone: c.patientPhone || c.patient_?.phone,
+                subject: 'Consultation starting soon',
+                text: pushMessage,
+                pushTitle: '📞 Consultation starts soon',
+                pushBody: pushMessage,
+                pushData: {
+                  consultationId: String(c._id),
+                  roomId: c.roomId,
+                  type: 'consultation_starting_soon',
+                  route: `/call/${c.roomId}`,
+                },
+              });
+              console.log(`[consultation-check] Sent pre-start push to patient ${c.patient}`);
+            } catch (errPush) {
+              console.error('[consultation-check] Failed to send pre-start push:', errPush);
+            }
+
             // also notify the doctor (email + SMS) if contact information available
             try {
               let doctorContact = c.doctor_ || null;
@@ -155,6 +178,29 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
               await sendEmail(patientEmail, subject, text);
             } catch (errEmail) {
               console.error('[consultation-check] Failed to send start email:', errEmail);
+            }
+
+            try {
+              const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
+              const pushMessage = `Your consultation with ${doctorName} is starting now. Tap to join.`;
+              await notifyViaAllChannels({
+                ownerId: c.patient,
+                email: c.patientEmail || c.patient_?.email,
+                phone: c.patientPhone || c.patient_?.phone,
+                subject: 'Consultation is starting now',
+                text: pushMessage,
+                pushTitle: '🔔 Consultation is starting now',
+                pushBody: pushMessage,
+                pushData: {
+                  consultationId: String(c._id),
+                  roomId: c.roomId,
+                  type: 'consultation_started',
+                  route: `/call/${c.roomId}`,
+                },
+              });
+              console.log(`[consultation-check] Sent start push to patient ${c.patient}`);
+            } catch (errPush) {
+              console.error('[consultation-check] Failed to send start push:', errPush);
             }
 
             // notify doctor at start (email + SMS)

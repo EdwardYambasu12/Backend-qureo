@@ -50,7 +50,7 @@ class ConsultationReminderScheduler {
 
       // --- 5-min warning: appointmentTime is between now and now+5min ---
       const comingSoon = await Consultation.find({
-        status: 'scheduled',
+        status: { $in: ['scheduled', 'confirmed'] },
         notifiedBefore: false,
         appointmentTime: { $gte: now, $lte: in5 },
       }).lean();
@@ -67,7 +67,7 @@ class ConsultationReminderScheduler {
       // --- At start time: appointmentTime is in the past but within last 5 min ---
       const fiveAgo = new Date(now.getTime() - 5 * 60 * 1000);
       const starting = await Consultation.find({
-        status: 'scheduled',
+        status: { $in: ['scheduled', 'confirmed'] },
         notifiedStart: false,
         appointmentTime: { $gte: fiveAgo, $lte: now },
       }).lean();

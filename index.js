@@ -380,6 +380,16 @@ app.get('/api/test/push-broadcast-status', (req, res) => {
   }
 });
 
+app.get('/api/test/push-service-status', (req, res) => {
+  try {
+    const { getPushServiceStatus } = require('./utils/pushService');
+    const status = getPushServiceStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // TEST ENDPOINT: Send a test push notification to the current user (authenticated)
 app.post('/api/test/send-push-to-me', auth, async (req, res) => {
   try {

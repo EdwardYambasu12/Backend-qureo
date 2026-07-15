@@ -25,28 +25,115 @@ try {
 
 // Initialize Firebase Admin from service account key
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH;
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 let firebaseApp = null;
-try {
-  if (!serviceAccountPath) {
-    console.warn('[Push Service] FIREBASE_SERVICE_ACCOUNT_KEY_PATH not set. Push notifications are disabled until this is configured.');
-  } else {
+let pushInitStatus = {
+  initialized: false,
+  source: 'none',
+  reason: '',
+};
+
+function normalizeServiceAccount(serviceAccount) {
+  if (!serviceAccount || typeof serviceAccount !== 'object') return null;
+  const normalized = { ...serviceAccount };
+  if (typeof normalized.private_key === 'string') {
+    normalized.private_key = normalized.private_key.replace(/\\n/g, '\n');
+  }
+  return normalized;
+}
+
+function parseServiceAccountFromEnv() {
+  if (serviceAccountJson) {
+    try {
+      const parsed = JSON.parse(serviceAccountJson);
+      return { source: 'env_json', serviceAccount: normalizeServiceAccount(parsed) };
+    } catch (error) {
+      console.error('[Push Service] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:', error.message);
+      pushInitStatus.reason = 'Invalid FIREBASE_SERVICE_ACCOUNT_JSON';
+    }
+  }
+
+  if (serviceAccountBase64) {
+    try {
+      const decoded = Buffer.from(serviceAccountBase64, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded);
+      return { source: 'env_base64', serviceAccount: normalizeServiceAccount(parsed) };
+    } catch (error) {
+      console.error('[Push Service] Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:', error.message);
+      pushInitStatus.reason = 'Invalid FIREBASE_SERVICE_ACCOUNT_BASE64';
+    }
+  }
+
+  if (serviceAccountPath) {
     const resolvedServiceAccountPath = path.resolve(serviceAccountPath);
     if (!fs.existsSync(resolvedServiceAccountPath)) {
       console.warn(`[Push Service] Service account file not found at: ${resolvedServiceAccountPath}. Push notifications are disabled.`);
+      pushInitStatus.reason = `Service account file not found at ${resolvedServiceAccountPath}`;
+      return null;
+    }
+
+    try {
+      const parsed = require(resolvedServiceAccountPath);
+      return { source: 'file_path', serviceAccount: normalizeServiceAccount(parsed) };
+    } catch (error) {
+      console.error('[Push Service] Failed to read service account file:', error.message);
+      pushInitStatus.reason = 'Unable to read FIREBASE_SERVICE_ACCOUNT_KEY_PATH JSON';
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function normalizeDataPayload(data = {}) {
+  const result = {};
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === 'string') {
+      result[key] = value;
+      return;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = String(value);
+      return;
+    }
+    try {
+      result[key] = JSON.stringify(value);
+    } catch {
+      result[key] = String(value);
+    }
+  });
+  return result;
+}
+
+try {
+  const credentialBundle = parseServiceAccountFromEnv();
+  if (!credentialBundle) {
+    if (!pushInitStatus.reason) {
+      pushInitStatus.reason = 'No Firebase service account configured';
+    }
+    console.warn('[Push Service] Firebase service account not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_SERVICE_ACCOUNT_BASE64, or FIREBASE_SERVICE_ACCOUNT_KEY_PATH.');
+  } else {
+    if (!initializeApp || !cert || !getMessaging) {
+      pushInitStatus.reason = 'Firebase SDK loader unavailable';
+      console.warn('[Push Service] Firebase SDK loader is unavailable. Push notifications are disabled.');
     } else {
-      if (!initializeApp || !cert || !getMessaging) {
-        console.warn('[Push Service] Firebase SDK loader is unavailable. Push notifications are disabled.');
-      } else {
-        const serviceAccount = require(resolvedServiceAccountPath);
-        firebaseApp = initializeApp({
-          credential: cert(serviceAccount),
-          projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id,
-        });
-        console.log(`[Push Service] Firebase Admin initialized (project: ${process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id || 'unknown'})`);
-      }
+      const serviceAccount = credentialBundle.serviceAccount;
+      firebaseApp = initializeApp({
+        credential: cert(serviceAccount),
+        projectId: process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id,
+      });
+      pushInitStatus = {
+        initialized: true,
+        source: credentialBundle.source,
+        reason: '',
+      };
+      console.log(`[Push Service] Firebase Admin initialized (project: ${process.env.FIREBASE_PROJECT_ID || serviceAccount.project_id || 'unknown'}, source: ${credentialBundle.source})`);
     }
   }
 } catch (err) {
+  pushInitStatus.reason = err.message;
   console.error('[Push Service] Failed to initialize Firebase Admin:', err.message);
 }
 
@@ -74,10 +161,10 @@ async function sendPushToToken(token, title, body, data = {}) {
     const messaging = getMessaging(firebaseApp);
 
     // Ensure route field is present for deep-linking
-    const enrichedData = {
+    const enrichedData = normalizeDataPayload({
       ...data,
       route: data.route || '/notification', // fallback to notification page if no route specified
-    };
+    });
 
     // Build the message payload
     const message = {
@@ -152,10 +239,10 @@ async function sendPushToMultipleTokens(tokens, title, body, data = {}) {
   try {
     const messaging = getMessaging(firebaseApp);
 
-    const enrichedData = {
+    const enrichedData = normalizeDataPayload({
       ...data,
       route: data.route || '/notification',
-    };
+    });
 
     const message = {
       notification: {
@@ -216,4 +303,5 @@ async function sendPushToMultipleTokens(tokens, title, body, data = {}) {
 module.exports = {
   sendPushToToken,
   sendPushToMultipleTokens,
+  getPushServiceStatus: () => ({ ...pushInitStatus }),
 };
