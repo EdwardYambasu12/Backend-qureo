@@ -834,10 +834,18 @@ Format response as clear, actionable points. Be specific and supportive.`;
       const isSameDay = lastNotifiedAt ? lastNotifiedAt.toDateString() === now.toDateString() : false;
 
       if (isSameTask && isSameDay && !activePlan.tasks?.[nextStep.key]?.completed) {
-        return { sent: false, reason: 'Care plan step already notified today', taskKey: nextStep.key };
+        const minutesSinceLastNotify = Math.floor((now.getTime() - lastNotifiedAt.getTime()) / 60000);
+        if (minutesSinceLastNotify < 30) {
+          return {
+            sent: false,
+            reason: 'Care plan step already notified recently',
+            taskKey: nextStep.key,
+            retryAfterMinutes: 30 - minutesSinceLastNotify,
+          };
+        }
       }
 
-      await notifyUser({
+      const notifyResult = await notifyUser({
         userId,
         type: nextStep.type,
         title: nextStep.title,
@@ -854,6 +862,18 @@ Format response as clear, actionable points. Be specific and supportive.`;
         genericTitle: 'You have a new care plan step',
         genericBody: 'Open Qureo to view your next remote monitoring step.',
       });
+
+      if (!notifyResult?.success) {
+        await activePlan.save();
+        console.warn(
+          `[care-plan-push] Push not sent for user ${userId}, step ${nextStep.key}: ${notifyResult?.reason || 'Unknown reason'}`
+        );
+        return {
+          sent: false,
+          reason: notifyResult?.reason || 'Push delivery failed',
+          taskKey: nextStep.key,
+        };
+      }
 
       activePlan.notificationState = {
         lastNotifiedTaskKey: nextStep.key,
