@@ -53,6 +53,8 @@ const CATEGORY_CATALOG = {
 };
 
 const NOTIFICATION_TYPE_MAP = {
+  consultation_booked: { category: 'doctor_consultations' },
+  consultation_30min: { category: 'doctor_consultations' },
   consultation_starting_soon: { category: 'doctor_consultations' },
   consultation_started: { category: 'doctor_consultations' },
   in_person_pending: { category: 'doctor_consultations' },

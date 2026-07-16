@@ -16,6 +16,7 @@ const consultationSchema = new mongoose.Schema({
     enum: ["scheduled", "ongoing", "pending", "confirmed", "cancelled", "completed", "no_show"],
     default: "scheduled",
   },
+  notified30min: { type: Boolean, default: false },
   notifiedBefore: { type: Boolean, default: false },
   notifiedStart: { type: Boolean, default: false },
   patientName: { type: String, default: "" },

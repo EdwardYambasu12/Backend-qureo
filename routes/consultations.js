@@ -89,54 +89,52 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
       console.log("[consultation-check] Running consultation status check...");
       try {
         const now = new Date();
-        // fetch scheduled consultations that are near (within next 16 minutes) or already due
-        const windowAhead = new Date(now.getTime() + 16 * 60 * 1000);
+        // fetch scheduled consultations that are near (within next 31 minutes) or already due
+        const windowAhead = new Date(now.getTime() + 31 * 60 * 1000);
         const candidates = await Consultation.find({ status: { $in: STATUS_ACTIVE_FOR_REMINDERS }, appointmentTime: { $lte: windowAhead } });
 
         for (const c of candidates) {
           const diffMs = c.appointmentTime.getTime() - now.getTime();
           const diffMinutes = Math.floor(diffMs / 60000);
 
-          // 15 minutes before
-          if (diffMs <= 15 * 60 * 1000 && diffMs > 0 && !c.notifiedBefore) {
-            console.log(`[consultation-check] Consultation ${c._id} for patient ${c.patient} scheduled in ${diffMinutes} minutes — sending pre-start notification`);
-            // send email reminder to patient
-             console.log("found for email")
+          // 30 minutes before — send booking reminder once
+          if (diffMs <= 30 * 60 * 1000 && diffMs > 0 && !c.notified30min) {
+            console.log(`[consultation-check] Consultation ${c._id} for patient ${c.patient} scheduled in ${diffMinutes} minutes — sending 30-min notification`);
             try {
               const patientEmail = c.patientEmail || (c.patient_ && c.patient_.email);
               const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
               const apptTime = new Date(c.appointmentTime).toLocaleString();
-              const subject = `Upcoming consultation with ${doctorName} in ${diffMinutes} minutes`;
+              const subject = `Upcoming consultation with ${doctorName} in 30 minutes`;
               const text = `Hi,\n\nThis is a reminder that your consultation with ${doctorName} is scheduled to start at ${apptTime}. Please be ready and join on time.\n\nThanks.`;
               await sendEmail(patientEmail, subject, text);
             } catch (errEmail) {
-              console.error('[consultation-check] Failed to send pre-start email:', errEmail);
+              console.error('[consultation-check] Failed to send 30-min email:', errEmail);
             }
 
             try {
               const doctorName = (c.doctor_ && (c.doctor_.name || c.doctor_.fullName)) || 'your doctor';
-              const pushMessage = `Your consultation with ${doctorName} starts in ${Math.max(diffMinutes, 1)} minutes. Please get ready.`;
+              const pushMessage = `Your consultation with ${doctorName} starts in about 30 minutes. Please get ready.`;
               await notifyViaAllChannels({
                 ownerId: c.patient,
                 email: c.patientEmail || c.patient_?.email,
                 phone: c.patientPhone || c.patient_?.phone,
-                subject: 'Consultation starting soon',
+                subject: 'Consultation in 30 minutes',
                 text: pushMessage,
-                pushTitle: '📞 Consultation starts soon',
+                pushTitle: '🗓️ Consultation in 30 minutes',
                 pushBody: pushMessage,
                 pushData: {
                   consultationId: String(c._id),
                   roomId: c.roomId,
-                  type: 'consultation_starting_soon',
+                  type: 'consultation_30min',
                   route: `/call/${c.roomId}`,
                 },
               });
-              console.log(`[consultation-check] Sent pre-start push to patient ${c.patient}`);
+              console.log(`[consultation-check] Sent 30-min push to patient ${c.patient}`);
             } catch (errPush) {
-              console.error('[consultation-check] Failed to send pre-start push:', errPush);
+              console.error('[consultation-check] Failed to send 30-min push:', errPush);
             }
 
-            // also notify the doctor (email + SMS) if contact information available
+            // also notify the doctor
             try {
               let doctorContact = c.doctor_ || null;
               if (!doctorContact) {
@@ -146,22 +144,19 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
               const doctorPhone = doctorContact && (doctorContact.phone || doctorContact.mobile || doctorContact.phoneNumber);
               const docName = doctorContact && (doctorContact.name || doctorContact.fullName) || 'Doctor';
               if (doctorEmail) {
-                const subjectDoc = `Upcoming consultation with ${c.patient_?.name || 'a patient'} in ${diffMinutes} minutes`;
-                const textDoc = `Hi ${docName},\n\nYou have a consultation scheduled with ${c.patient_?.name || 'a patient'} at ${new Date(c.appointmentTime).toLocaleString()}. This is a ${diffMinutes}-minute reminder.\n\nThanks.`;
+                const subjectDoc = `Upcoming consultation with ${c.patient_?.name || 'a patient'} in 30 minutes`;
+                const textDoc = `Hi ${docName},\n\nYou have a consultation scheduled with ${c.patient_?.name || 'a patient'} at ${new Date(c.appointmentTime).toLocaleString()}. This is a 30-minute reminder.\n\nThanks.`;
                 await sendEmail(doctorEmail, subjectDoc, textDoc);
-                console.log(`[consultation-check] Sent pre-start email to doctor ${doctorEmail}`);
               }
               if (doctorPhone) {
-                const sms = `Reminder: consultation with ${c.patient_?.name || 'a patient'} in ${diffMinutes} minutes at ${new Date(c.appointmentTime).toLocaleTimeString()}`;
+                const sms = `Reminder: consultation with ${c.patient_?.name || 'a patient'} in 30 minutes at ${new Date(c.appointmentTime).toLocaleTimeString()}`;
                 await sendSMS(doctorPhone, sms);
-                console.log(`[consultation-check] Sent pre-start SMS to doctor ${doctorPhone}`);
               }
             } catch (errDocNotify) {
-              console.error('[consultation-check] Failed to notify doctor (pre-start):', errDocNotify);
+              console.error('[consultation-check] Failed to notify doctor (30-min):', errDocNotify);
             }
 
-            // mark as notifiedBefore to avoid duplicate notifications
-            await Consultation.findByIdAndUpdate(c._id, { notifiedBefore: true, updatedAt: new Date() });
+            await Consultation.findByIdAndUpdate(c._id, { notified30min: true, updatedAt: new Date() });
           }
 
           // time to start (or already started)
@@ -351,7 +346,27 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
             consultationId: String(consultation._id), 
             status: consultation.status, 
             type: "in_person_pending",
-            route: '/notification', // Links to notifications page for consultation details
+            route: '/notification',
+          },
+        });
+      } else {
+        // Online consultation — notify the patient that their booking is confirmed
+        const doctorName = doctorDoc.name || doctorDoc.fullName || 'your doctor';
+        const apptStr = new Date(consultation.appointmentTime).toLocaleString();
+        const patientBookingMsg = `Your consultation with ${doctorName} is booked for ${apptStr}. We'll remind you 30 minutes and 5 minutes before it starts.`;
+        await notifyViaAllChannels({
+          ownerId: patient,
+          email: patientEmail || patient_?.email,
+          phone: patient_?.phone || '',
+          subject: 'Consultation booking confirmed',
+          text: patientBookingMsg,
+          pushTitle: '✅ Consultation Booked',
+          pushBody: patientBookingMsg,
+          pushData: {
+            consultationId: String(consultation._id),
+            roomId: consultation.roomId,
+            type: 'consultation_booked',
+            route: '/appoint',
           },
         });
       }

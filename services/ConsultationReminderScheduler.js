@@ -46,13 +46,32 @@ class ConsultationReminderScheduler {
 
     try {
       const now = new Date();
-      const in5 = new Date(now.getTime() + 5 * 60 * 1000);
+
+      // --- 30-min warning ---
+      const in30 = new Date(now.getTime() + 30 * 60 * 1000);
+      const in29 = new Date(now.getTime() + 29 * 60 * 1000);
+      const coming30 = await Consultation.find({
+        status: { $in: ['scheduled', 'confirmed'] },
+        notified30min: { $ne: true },
+        appointmentTime: { $gte: in29, $lte: in30 },
+      }).lean();
+
+      for (const c of coming30) {
+        await this._notify(c, {
+          title: '🗓️ Consultation in 30 minutes',
+          body: `Your consultation with ${c.doctor_?.name || 'your doctor'} starts in 30 minutes. Tap to prepare.`,
+          type: 'consultation_30min',
+          flag: 'notified30min',
+        });
+      }
 
       // --- 5-min warning: appointmentTime is between now and now+5min ---
+      const in5 = new Date(now.getTime() + 5 * 60 * 1000);
+      const in4 = new Date(now.getTime() + 4 * 60 * 1000);
       const comingSoon = await Consultation.find({
         status: { $in: ['scheduled', 'confirmed'] },
-        notifiedBefore: false,
-        appointmentTime: { $gte: now, $lte: in5 },
+        notifiedBefore: { $ne: true },
+        appointmentTime: { $gte: in4, $lte: in5 },
       }).lean();
 
       for (const c of comingSoon) {
@@ -68,7 +87,7 @@ class ConsultationReminderScheduler {
       const fiveAgo = new Date(now.getTime() - 5 * 60 * 1000);
       const starting = await Consultation.find({
         status: { $in: ['scheduled', 'confirmed'] },
-        notifiedStart: false,
+        notifiedStart: { $ne: true },
         appointmentTime: { $gte: fiveAgo, $lte: now },
       }).lean();
 
