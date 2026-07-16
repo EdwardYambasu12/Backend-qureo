@@ -66,6 +66,99 @@ function detectActions(replyText) {
   return actions;
 }
 
+function detectActionsFromUserIntent(userText) {
+  const t = String(userText || '').toLowerCase();
+  if (!t.trim()) return [];
+
+  const actions = [];
+  const push = (action) => {
+    if (!actions.find((a) => a.type === action.type && a.path === action.path && a.label === action.label)) {
+      actions.push(action);
+    }
+  };
+
+  const hasAny = (keywords = []) => keywords.some((k) => t.includes(k));
+
+  if (hasAny(['read', 'article', 'blog', 'learn', 'learn health', 'health education'])) {
+    push({ type: 'navigate', label: 'Go to Learn Health', path: '/blogs' });
+  }
+
+  if (hasAny(['symptom', 'symptoms', 'symptom checker', 'check symptom', 'what disease'])) {
+    push({ type: 'navigate', label: 'Open symptom checker', path: '/symptom-checker' });
+  }
+
+  if (hasAny(['pharmacy', 'medicine', 'drug', 'prescription', 'buy medicine'])) {
+    push({ type: 'navigate', label: 'Open pharmacy', path: '/epharmacy' });
+  }
+
+  if (hasAny(['doctor', 'consult', 'consultation', 'appointment', 'book doctor'])) {
+    push({ type: 'navigate', label: 'Open consultations', path: '/doctor-consult' });
+  }
+
+  if (hasAny(['lab', 'test', 'lab test', 'blood test', 'scan test'])) {
+    push({ type: 'navigate', label: 'Open lab tests', path: '/lab-tests' });
+  }
+
+  if (hasAny(['wallet', 'balance', 'payment', 'pay', 'billing'])) {
+    push({ type: 'navigate', label: 'Open wallet', path: '/health-wallet' });
+  }
+
+  if (hasAny(['insurance', 'claim', 'policy'])) {
+    push({ type: 'navigate', label: 'Open insurance', path: '/insurance' });
+  }
+
+  if (hasAny(['record', 'health record', 'document', 'report'])) {
+    push({ type: 'navigate', label: 'Open health records', path: '/my-health-records' });
+  }
+
+  if (hasAny(['remote', 'monitoring', 'track vitals', 'vitals tracking'])) {
+    push({ type: 'navigate', label: 'Open remote monitoring', path: '/remote' });
+  }
+
+  if (hasAny(['tip', 'tips', 'health tip'])) {
+    push({ type: 'navigate', label: 'Open health tips', path: '/health-tips' });
+  }
+
+  if (hasAny(['notification', 'notifications', 'alert'])) {
+    push({ type: 'navigate', label: 'Open notifications', path: '/notification' });
+  }
+
+  if (hasAny(['order', 'orders', 'delivery'])) {
+    push({ type: 'navigate', label: 'View orders', path: '/orders' });
+  }
+
+  if (hasAny(['service', 'nearby', 'clinic near me'])) {
+    push({ type: 'navigate', label: 'Open nearby services', path: '/services' });
+  }
+
+  if (hasAny(['campaign', 'campaigns'])) {
+    push({ type: 'navigate', label: 'Open campaigns', path: '/campaigns' });
+  }
+
+  if (hasAny(['emergency', 'urgent', 'help now'])) {
+    push({ type: 'navigate', label: 'Open emergency response', path: '/emergency-response' });
+  }
+
+  if (hasAny(['profile', 'account'])) {
+    push({ type: 'navigate', label: 'Open profile', path: '/profile' });
+  }
+
+  if (hasAny(['setting', 'settings', 'preference'])) {
+    push({ type: 'navigate', label: 'Open settings', path: '/settings' });
+  }
+
+  if (hasAny(['apps', 'features', 'what can you do', 'take me around', 'guide me'])) {
+    push({ type: 'navigate', label: 'Go to Home', path: '/home' });
+    push({ type: 'navigate', label: 'Go to Learn Health', path: '/blogs' });
+    push({ type: 'navigate', label: 'Open symptom checker', path: '/symptom-checker' });
+    push({ type: 'navigate', label: 'Open consultations', path: '/doctor-consult' });
+    push({ type: 'navigate', label: 'Open lab tests', path: '/lab-tests' });
+    push({ type: 'navigate', label: 'Open pharmacy', path: '/epharmacy' });
+  }
+
+  return actions;
+}
+
 function removeInlineActionsBlock(text) {
   if (!text || typeof text !== 'string') return text || '';
   const marker = 'ACTIONS:';
@@ -180,7 +273,7 @@ router.post('/chat', async (req, res) => {
 
     try { const logsDir = path.resolve(__dirname, '..', 'logs'); if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true }); const preview = redactText((messages.slice(-1)[0]?.content || '').slice(0,120)).replace(/\n/g,' '); fs.appendFileSync(path.join(logsDir, 'asha.log'), `${new Date().toISOString()} | IP:${ip} | userPreview:${preview}\n`); } catch (e) { console.warn('Log fail', e.message||e); }
 
-    const systemPrompt = { role: 'system', content: "You are Asha, a friendly, concise, and safety-aware health assistant for a healthcare app. You can provide general symptom insights, likely possibilities, home-care tips, and clear next steps. Never give a definitive diagnosis, never claim certainty, and never replace clinical judgement. Ask follow-up questions when details are missing. If red-flag symptoms are present (e.g. severe chest pain, breathing difficulty, stroke signs, uncontrolled bleeding, confusion), clearly advise immediate emergency care. You may suggest the Symptom Checker as an optional deeper flow, but do not refuse symptom questions by default. Keep responses practical and concise. Include a short disclaimer at the end: 'This is informational and not a substitute for professional medical advice.'\n\nWhen you want the app to present actions (for example navigation, booking, or emergency guidance), append a JSON object labeled 'ACTIONS' after your text. The JSON must be valid and contain an 'actions' array. Each action should follow this schema: { \"type\": (\"navigate\"|\"book_appointment\"|\"seek_emergency_care\"|\"book_lab_test\"), \"name\": optional_short_action_name, \"path\": optional_explicit_path, \"meta\": optional_object }. Use short action names the backend can map, e.g. 'profile','cart','orders','pharmacy','consultations','lab_tests','blogs','wallet','insurance','settings','symptom_checker'." };
+    const systemPrompt = { role: 'system', content: "You are Asha, a concise in-app guide for Qureo. Primary goal: help users understand features and take them to the correct app page. Do not provide long medical analysis unless explicitly asked; prefer app navigation help first.\n\nBehavior rules:\n1) If a user asks to read/learn -> route to Learn Health (/blogs).\n2) If user asks to check symptoms -> route to Symptom Checker (/symptom-checker).\n3) For doctor help -> consultations (/doctor-consult).\n4) For medicines -> ePharmacy (/epharmacy).\n5) For tests -> lab tests (/lab-tests).\n6) For wallet/payments -> health wallet (/health-wallet).\n7) For records -> health records (/my-health-records).\n8) For remote tracking -> remote monitoring (/remote).\n9) For notifications -> notification page (/notification).\n\nAlways include short, practical text (1-4 lines), then provide actions.\nWhen you want the app to present actions, append a JSON object labeled 'ACTIONS' with an 'actions' array. Each action schema: { \"type\": (\"navigate\"|\"book_appointment\"|\"seek_emergency_care\"|\"book_lab_test\"), \"name\": optional_short_action_name, \"path\": optional_explicit_path, \"meta\": optional_object }." };
     const profilePrompt = userProfile ? { role: 'system', content: `User profile: ${JSON.stringify(userProfile)}. Use this info to personalize, but do not reveal private identifiers.` } : null;
     const safeMessages = (profilePrompt ? [systemPrompt, profilePrompt, ...messages] : [systemPrompt, ...messages]).map(m=>({ role: m.role, content: redactText(m.content) }));
 
@@ -195,8 +288,12 @@ router.post('/chat', async (req, res) => {
     let parsedActions = extracted.parsedActions;
     if(parsedActions){ const wrapped={actions:parsedActions}; const valid = validateActionsWrapper(wrapped); if(!valid){ console.warn('ACTIONS validation failed', validateActionsWrapper.errors); parsedActions=null; } else parsedActions = wrapped.actions; }
 
+    const lastUserMessage = messages.slice().reverse().find((m) => m?.role === 'user' && typeof m?.content === 'string')?.content || '';
+    const intentActions = detectActionsFromUserIntent(lastUserMessage);
+
     let finalActions=[]; const allowed = new Set(['navigate','book_appointment','seek_emergency_care','book_lab_test']);
     if(Array.isArray(parsedActions)&&parsedActions.length>0){ for(const a of parsedActions){ if(!a||typeof a!=='object') continue; if(!a.type||!allowed.has(a.type)) continue; if(a.type==='navigate'){ if(a.name&&actionMap[a.name]) finalActions.push({ type:'navigate', label:actionMap[a.name].label, path:actionMap[a.name].path, name:a.name }); else if(a.path) finalActions.push({ type:'navigate', label:a.label||'Open page', path:a.path }); } else if(a.type==='book_appointment'){ const meta=a.meta||{}; const safeMeta={}; if(meta.doctorId&&typeof meta.doctorId==='string') safeMeta.doctorId=meta.doctorId; if(Array.isArray(meta.times)) safeMeta.times=meta.times.filter(t=>typeof t==='string'); finalActions.push({ type:'book_appointment', label:a.label||'Book appointment', meta:safeMeta }); } else if(a.type==='seek_emergency_care'){ finalActions.push({ type:'seek_emergency_care', label:a.label||'Seek emergency care' }); } else if(a.type==='book_lab_test'){ finalActions.push({ type:'book_lab_test', label:a.label||'Schedule lab test' }); } } } else { finalActions = detectActions(aiText); }
+    finalActions = [...intentActions, ...finalActions].filter((a, i, arr) => arr.findIndex((x) => x.type === a.type && x.path === a.path && x.label === a.label) === i);
 
     try{ const logsDir = path.resolve(__dirname,'..','logs'); if(!fs.existsSync(logsDir)) fs.mkdirSync(logsDir,{ recursive:true }); fs.appendFileSync(path.join(logsDir,'asha_actions.log'), `${new Date().toISOString()} | ACTIONS_EMITTED: ${JSON.stringify(finalActions)}\n`); }catch(e){ console.warn('Telem write failed', e.message||e); }
 
@@ -210,7 +307,7 @@ router.post('/stream', async (req,res)=>{
     if(!checkRateLimit(ip)) return res.status(429).json({ message:'Too many requests' });
     const { messages, userProfile } = req.body; if(!messages||!Array.isArray(messages)) return res.status(400).json({ message:"Missing 'messages' array" });
 
-    const systemPrompt = { role:'system', content: "You are Asha, a friendly, concise, and safety-aware health assistant for a healthcare app. You can provide general symptom insights, likely possibilities, home-care tips, and clear next steps. Never give a definitive diagnosis, never claim certainty, and never replace clinical judgement. Ask follow-up questions when details are missing. If red-flag symptoms are present (e.g. severe chest pain, breathing difficulty, stroke signs, uncontrolled bleeding, confusion), clearly advise immediate emergency care. You may suggest the Symptom Checker as an optional deeper flow, but do not refuse symptom questions by default. Include a short disclaimer at the end: 'This is informational and not a substitute for professional medical advice.'" };
+    const systemPrompt = { role:'system', content: "You are Asha, a concise in-app guide for Qureo. Primary goal: help users understand features and take them to the correct app page. Prefer navigation help over long medical explanations.\n\nRules:\n- Read/learn => /blogs\n- Check symptoms => /symptom-checker\n- Doctor consult => /doctor-consult\n- Medicines => /epharmacy\n- Lab tests => /lab-tests\n- Wallet => /health-wallet\n- Records => /my-health-records\n- Remote tracking => /remote\n- Notifications => /notification\n\nKeep response short, actionable, then provide actions." };
     const profilePrompt = userProfile ? { role:'system', content:`User profile: ${JSON.stringify(userProfile)}. Use this info to personalize, but do not reveal private identifiers.` } : null;
     const safeMessages = (profilePrompt ? [systemPrompt, profilePrompt, ...messages] : [systemPrompt, ...messages]).map(m=>({ role:m.role, content:redactText(m.content) }));
     const apiKey = process.env.DAILY_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_KEY; if(!apiKey) return res.status(500).json({ message:'OpenAI API key not configured.' });
@@ -225,7 +322,10 @@ router.post('/stream', async (req,res)=>{
       const valid = validateActionsWrapper(wrapped);
       actions = valid ? wrapped.actions : [];
     }
+    const lastUserMessage = messages.slice().reverse().find((m) => m?.role === 'user' && typeof m?.content === 'string')?.content || '';
+    const intentActions = detectActionsFromUserIntent(lastUserMessage);
     if (actions.length === 0) actions = detectActions(aiText);
+    actions = [...intentActions, ...actions].filter((a, i, arr) => arr.findIndex((x) => x.type === a.type && x.path === a.path && x.label === a.label) === i);
     res.setHeader('Content-Type','application/x-ndjson'); res.setHeader('Cache-Control','no-cache'); res.flushHeaders && res.flushHeaders();
     const chunkSize=80; for(let i=0;i<aiText.length;i+=chunkSize){ const piece=aiText.slice(i,i+chunkSize); res.write(JSON.stringify({ chunk: piece })+'\n'); await new Promise(r=>setTimeout(r,25)); }
     res.write(JSON.stringify({ done:true, actions })+'\n'); res.end();
