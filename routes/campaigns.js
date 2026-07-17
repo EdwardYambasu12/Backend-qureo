@@ -1,5 +1,7 @@
 const express = require("express");
 const Campaign = require("../models/Campaign");
+const User = require('../models/User');
+const { notifyUser } = require('../utils/notifyUser');
 
 const router = express.Router();
 
@@ -90,6 +92,28 @@ router.post("/", async (req, res) => {
       isPublished: typeof isPublished === "boolean" ? isPublished : true,
     });
 
+    try {
+      const users = await User.find({}).select('_id').limit(50).lean();
+      await Promise.allSettled(users.map((user) => notifyUser({
+        userId: user._id,
+        type: 'campaign_available',
+        title: 'New health campaign available',
+        body: `${campaign.title} is now available in Qureo.`,
+        balancedTitle: 'Campaign available',
+        balancedBody: 'A new health campaign is available near you.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view a new campaign.',
+        route: '/campaigns',
+        data: {
+          campaignId: String(campaign._id),
+          category: String(campaign.category || ''),
+          event: 'campaign_available',
+        },
+      })));
+    } catch (notifyError) {
+      console.warn('[campaigns] push failed after create:', notifyError?.message || notifyError);
+    }
+
     res.status(201).json({ message: "Campaign created successfully", campaign });
   } catch (error) {
     res.status(500).json({ message: "Error creating campaign", error: error.message });
@@ -105,6 +129,27 @@ router.put("/:id", async (req, res) => {
 
     if (!updated) {
       return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    try {
+      const users = await User.find({}).select('_id').limit(50).lean();
+      await Promise.allSettled(users.map((user) => notifyUser({
+        userId: user._id,
+        type: 'campaign_follow_up',
+        title: 'Campaign updated',
+        body: `${updated.title} has been updated in Qureo.`,
+        balancedTitle: 'Campaign follow-up',
+        balancedBody: 'A campaign you may be interested in changed.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view the update.',
+        route: '/campaigns',
+        data: {
+          campaignId: String(updated._id),
+          event: 'campaign_follow_up',
+        },
+      })));
+    } catch (notifyError) {
+      console.warn('[campaigns] push failed after update:', notifyError?.message || notifyError);
     }
 
     res.json({ message: "Campaign updated successfully", campaign: updated });

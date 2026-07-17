@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const Doctor = require("../models/Doctor");
+const Consultation = require('../models/Consultations');
 const bcrypt = require("bcryptjs");
 const doctorAuth = require('../middleware/doctorAuth');
 const jwt = require("jsonwebtoken")// ✅ Register Doctor
+const { notifyUser } = require('../utils/notifyUser');
 
 // ✅ Register Doctor
 router.post("/", async (req, res) => {
@@ -88,6 +90,26 @@ router.post("/", async (req, res) => {
 
     await newDoctor.save();
 
+    try {
+      await notifyUser({
+        userId: newDoctor._id,
+        type: 'account_security_alert',
+        title: 'Doctor profile created',
+        body: 'Your doctor account was created successfully.',
+        balancedTitle: 'Doctor account ready',
+        balancedBody: 'Your doctor profile is ready in Qureo.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to finish setup.',
+        route: '/home',
+        data: {
+          event: 'doctor_signup',
+          doctorId: String(newDoctor._id),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[doctor] push failed after register:', notifyError?.message || notifyError);
+    }
+
     // ---- Remove sensitive fields from response ----
     const doctorResponse = newDoctor.toObject();
     delete doctorResponse.passwordHash;
@@ -135,6 +157,36 @@ router.post("/login", async (req, res) => {
     // ---- Clean response ----
     const doctorResponse = doctor.toObject();
     delete doctorResponse.passwordHash;
+
+    try {
+      const upcomingPatients = await Consultation.find({
+        doctor: doctor._id,
+        status: { $in: ['scheduled', 'confirmed', 'pending'] },
+        appointmentTime: { $gte: new Date(), $lte: new Date(Date.now() + 60 * 60 * 1000) },
+      }).select('patient appointmentTime roomId').lean();
+
+      for (const consultation of upcomingPatients.slice(0, 10)) {
+        await notifyUser({
+          userId: consultation.patient,
+          type: 'consultation_started',
+          title: 'Doctor is online',
+          body: 'Your doctor is online and available now.',
+          balancedTitle: 'Doctor online',
+          balancedBody: 'Your doctor is available now.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to join your consultation.',
+          route: '/doctor-consult',
+          data: {
+            consultationId: String(consultation._id),
+            roomId: String(consultation.roomId || ''),
+            doctorId: String(doctor._id),
+            event: 'doctor_online',
+          },
+        });
+      }
+    } catch (notifyError) {
+      console.warn('[doctor] push failed after login:', notifyError?.message || notifyError);
+    }
 
     res.status(200).json({
 
@@ -579,6 +631,39 @@ router.put("/:id/update", async (req, res) => {
       projection: { passwordHash: 0 },
     });
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'isOnline') && updates.isOnline === true) {
+      try {
+        const upcomingPatients = await Consultation.find({
+          doctor: doctor._id,
+          status: { $in: ['scheduled', 'confirmed', 'pending'] },
+          appointmentTime: { $gte: new Date(), $lte: new Date(Date.now() + 60 * 60 * 1000) },
+        }).select('patient appointmentTime roomId').lean();
+
+        for (const consultation of upcomingPatients.slice(0, 10)) {
+          await notifyUser({
+            userId: consultation.patient,
+            type: 'consultation_started',
+            title: 'Doctor is online',
+            body: 'Your doctor is online and available now.',
+            balancedTitle: 'Doctor online',
+            balancedBody: 'Your doctor is available now.',
+            genericTitle: 'You have a new update in Qureo',
+            genericBody: 'Open Qureo to join your consultation.',
+            route: '/doctor-consult',
+            data: {
+              consultationId: String(consultation._id),
+              roomId: String(consultation.roomId || ''),
+              doctorId: String(doctor._id),
+              event: 'doctor_online',
+            },
+          });
+        }
+      } catch (notifyError) {
+        console.warn('[doctor] push failed after online update:', notifyError?.message || notifyError);
+      }
+    }
+
     res.json({ message: "Doctor updated", doctor });
   } catch (error) {
     res.status(500).json({ message: error.message });

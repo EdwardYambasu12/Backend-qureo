@@ -1,5 +1,6 @@
 const express = require("express");
 const Prescription = require("../models/Prescription");
+const { notifyUser } = require('../utils/notifyUser');
 
 const router = express.Router();
 
@@ -19,6 +20,28 @@ router.post("/save", async (req, res) => {
       imageUrl,
       source: "uploaded",
     });
+
+    try {
+      if (owner) {
+        await notifyUser({
+          userId: owner,
+          type: 'health_record_added',
+          title: 'New medical record added',
+          body: 'A new record is available in your health records.',
+          balancedTitle: 'Health record added',
+          balancedBody: 'A new medical record was added to your account.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to view your latest health record.',
+          route: '/my-health-records',
+          data: {
+            prescriptionId: String(prescription._id),
+            requiresPharmacistReview: String(Boolean(requiresPharmacistReview)),
+          },
+        });
+      }
+    } catch (notifyError) {
+      console.warn('[prescription] push failed after record save:', notifyError?.message || notifyError);
+    }
 
 
     console.log("Saved successfully")

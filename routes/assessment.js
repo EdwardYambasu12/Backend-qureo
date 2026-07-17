@@ -3,6 +3,7 @@ const router = express.Router();
 const HealthAssessment = require('../models/HealthAssessment');
 const auth = require('../middleware/auth');
 const { sendOtp, verifyOtp } = require('../services/twilioVerify');
+const { notifyUser } = require('../utils/notifyUser');
 
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
@@ -167,6 +168,26 @@ async function upsertSingleAssessment(req, res) {
       Object.assign(existing, payload);
       await existing.save();
 
+      try {
+        await notifyUser({
+          userId: uid,
+          type: 'assessment_ready',
+          title: 'Your assessment has been updated',
+          body: 'Your latest assessment is ready in Qureo.',
+          balancedTitle: 'Assessment updated',
+          balancedBody: 'Your health assessment was updated.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to review your assessment and next step.',
+          route: '/health-assessment',
+          data: {
+            assessmentId: String(existing._id),
+            updated: true,
+          },
+        });
+      } catch (notifyError) {
+        console.warn('[assessment] push failed after update:', notifyError?.message || notifyError);
+      }
+
       // Ensure one assessment per user by cleaning stale duplicates if they exist.
       await HealthAssessment.deleteMany({ user: uid, _id: { $ne: existing._id } });
 
@@ -175,6 +196,27 @@ async function upsertSingleAssessment(req, res) {
 
     const a = new HealthAssessment({ user: uid, ...payload });
     await a.save();
+
+    try {
+      await notifyUser({
+        userId: uid,
+        type: 'assessment_ready',
+        title: 'Your assessment is ready',
+        body: 'Your health journey update is ready in Qureo.',
+        balancedTitle: 'Assessment ready',
+        balancedBody: 'Your assessment has been completed.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to review your assessment and next step.',
+        route: '/health-assessment',
+        data: {
+          assessmentId: String(a._id),
+          updated: false,
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[assessment] push failed after create:', notifyError?.message || notifyError);
+    }
+
     return res.status(201).json({ assessment: a, duplicate: false, updated: false });
   } catch (err) {
     console.error(err);

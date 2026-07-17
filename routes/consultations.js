@@ -11,6 +11,7 @@ const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
 const { sendPushToToken } = require("../utils/pushService");
+const { notifyUser } = require("../utils/notifyUser");
 
 const STATUS_ACTIVE_FOR_CONFLICT = ["scheduled", "ongoing", "pending", "confirmed"];
 const STATUS_ACTIVE_FOR_REMINDERS = ["scheduled", "ongoing", "confirmed"];
@@ -557,6 +558,27 @@ router.put("/:id/complete", async (req, res) => {
       return res.status(404).json({ message: "Consultation not found" });
     }
 
+    try {
+      await notifyUser({
+        userId: consultation.patient,
+        type: 'consultation_summary',
+        title: 'Consultation summary available',
+        body: 'Your consultation has been completed and the summary is ready.',
+        balancedTitle: 'Consultation completed',
+        balancedBody: 'Your consultation summary is ready.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your consultation summary.',
+        route: '/notification',
+        data: {
+          consultationId: String(consultation._id),
+          status: 'completed',
+          endedAt: update.endedAt.toISOString(),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[consultations] push failed on consultation complete:', notifyError?.message || notifyError);
+    }
+
     res.json({ success: true, consultation });
   } catch (err) {
     res.status(500).json({ message: "Failed to complete consultation", error: err.message });
@@ -604,6 +626,26 @@ router.post("/:id/prescription/create", async (req, res) => {
     }));
 
     const saved = await Prescription.insertMany(docs);
+
+    try {
+      await notifyUser({
+        userId: consultation.patient,
+        type: 'consultation_notes',
+        title: 'Doctor shared notes or a prescription',
+        body: 'Your consultation notes are ready in Qureo.',
+        balancedTitle: 'Prescription available',
+        balancedBody: 'Your doctor shared consultation notes or a prescription.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your consultation notes.',
+        route: '/my-health-records',
+        data: {
+          consultationId: String(consultation._id),
+          prescriptionIds: saved.map((item) => String(item._id)),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[consultations] push failed on prescription create:', notifyError?.message || notifyError);
+    }
 
     return res.status(201).json({
       success: true,

@@ -661,7 +661,7 @@ Format response as clear, actionable points. Be specific and supportive.`;
               comparedToPrevious: `Heart rate: ${previous.hr} → ${current.hr} bpm (${trends.heartRate > 0 ? '+' : ''}${trends.heartRate})`,
               aiAnalysis: aiInsights.analysis.substring(0, 300), // First 300 chars of AI analysis
             },
-            notificationType: 'in_app',
+            notificationType: 'push',
           });
         } else {
           // Send AI health insight
@@ -675,7 +675,7 @@ Format response as clear, actionable points. Be specific and supportive.`;
               progressTrend: 'stable',
               aiAnalysis: aiInsights.analysis.substring(0, 300),
             },
-            notificationType: 'in_app',
+            notificationType: 'push',
           });
         }
       }
@@ -696,6 +696,9 @@ Format response as clear, actionable points. Be specific and supportive.`;
         return;
       }
 
+      const isEducationInsight = alert.type === 'health_insight';
+      const route = isEducationInsight ? '/blogs' : '/care-plan-today';
+
       await notifyUser({
         userId,
         type: alert.type,
@@ -705,9 +708,11 @@ Format response as clear, actionable points. Be specific and supportive.`;
           ...alert.data,
           alertId: alert._id?.toString?.() || undefined,
         },
-        route: '/care-plan-today',
-        genericTitle: 'You have a new remote monitoring update',
-        genericBody: 'Open Qureo to view your next care plan step.',
+        route,
+        balancedTitle: alert.title,
+        balancedBody: alert.message,
+        genericTitle: isEducationInsight ? 'You have a new health update in Qureo' : 'You have a new remote monitoring update',
+        genericBody: isEducationInsight ? 'Open Qureo to view your latest health insight.' : 'Open Qureo to view your next care plan step.',
       });
     } catch (error) {
       console.error('Error in sendNotification:', error);

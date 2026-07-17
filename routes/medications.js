@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const UserMedication = require('../models/UserMedication');
 const auth = require('../middleware/auth');
+const { notifyUser } = require('../utils/notifyUser');
 
 const buildNotExpiredFilter = (now = new Date()) => ({
   $or: [
@@ -132,6 +133,27 @@ router.post('/', auth, async (req, res) => {
 
     await newMedication.save();
 
+    try {
+      await notifyUser({
+        userId,
+        type: 'medication_reminder',
+        title: 'Medication added',
+        body: `${medicineName} was added to your medication list.`,
+        balancedTitle: 'Medication reminder set',
+        balancedBody: 'A medication was added to your schedule.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your medication schedule.',
+        route: '/reminders',
+        data: {
+          medicationId: String(newMedication._id),
+          medicineName,
+          frequency: String(frequency || ''),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[medications] push failed after add:', notifyError?.message || notifyError);
+    }
+
     res.status(201).json({
       message: 'Medication added successfully',
       medication: newMedication,
@@ -230,6 +252,27 @@ router.post('/:id/mark-dose', auth, async (req, res) => {
 
     await medication.save();
 
+    try {
+      await notifyUser({
+        userId,
+        type: 'medication_reminder',
+        title: 'Dose marked as taken',
+        body: `${medication.medicineName} was marked as taken.`,
+        balancedTitle: 'Medication updated',
+        balancedBody: 'Your dose status was updated.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to review your medication progress.',
+        route: '/reminders',
+        data: {
+          medicationId: String(medication._id),
+          dosageTime: String(dosageTime || ''),
+          status: 'taken',
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[medications] push failed after mark-dose:', notifyError?.message || notifyError);
+    }
+
     res.json({
       message: 'Dose marked as taken',
       medication,
@@ -273,6 +316,27 @@ router.post('/:id/mark-missed', auth, async (req, res) => {
 
     await medication.save();
 
+    try {
+      await notifyUser({
+        userId,
+        type: 'medication_reminder',
+        title: 'Missed dose recorded',
+        body: `${medication.medicineName} was marked as missed.`,
+        balancedTitle: 'Medication reminder',
+        balancedBody: 'A dose was marked as missed.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to review your medication schedule.',
+        route: '/reminders',
+        data: {
+          medicationId: String(medication._id),
+          dosageTime: String(dosageTime || ''),
+          status: 'missed',
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[medications] push failed after mark-missed:', notifyError?.message || notifyError);
+    }
+
     res.json({
       message: 'Dose marked as missed',
       medication,
@@ -305,6 +369,26 @@ router.post('/:id/complete', auth, async (req, res) => {
     medication.isActive = false;
 
     await medication.save();
+
+    try {
+      await notifyUser({
+        userId,
+        type: 'progress_update',
+        title: 'Medication completed',
+        body: `${medication.medicineName} was marked as completed.`,
+        balancedTitle: 'Medication completed',
+        balancedBody: 'Your medication course was completed.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your health journey update.',
+        route: '/reminders',
+        data: {
+          medicationId: String(medication._id),
+          status: 'completed',
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[medications] push failed after complete:', notifyError?.message || notifyError);
+    }
 
     res.json({
       message: 'Medication marked as completed',

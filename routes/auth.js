@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
+const { notifyUser } = require('../utils/notifyUser');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -74,9 +75,49 @@ router.post('/signup', async (req, res) => {
     const user = new User({ fullName: fullName || '', email: email.toLowerCase(), passwordHash: hash });
     await user.save();
 
+    try {
+      await notifyUser({
+        userId: user._id,
+        type: 'account_security_alert',
+        title: 'Welcome to Qureo',
+        body: 'Your account was created successfully.',
+        balancedTitle: 'Account created',
+        balancedBody: 'Your Qureo account is ready.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to finish setting up your account.',
+        route: '/health-assessment',
+        data: {
+          event: 'signup',
+          email: user.email,
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[auth] push failed after signup:', notifyError?.message || notifyError);
+    }
+
     res.json({
       user: serializeUser(user)
     });
+
+    try {
+      await notifyUser({
+        userId: user._id,
+        type: 'account_security_alert',
+        title: 'Signed in to Qureo',
+        body: 'Your account was accessed successfully.',
+        balancedTitle: 'Login successful',
+        balancedBody: 'You just signed in to Qureo.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to continue.',
+        route: '/home',
+        data: {
+          event: 'signin',
+          email: user.email,
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[auth] push failed after signin:', notifyError?.message || notifyError);
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -146,6 +187,26 @@ router.post('/google', async (req, res) => {
     }
 
     await user.save();
+
+    try {
+      await notifyUser({
+        userId: user._id,
+        type: 'account_security_alert',
+        title: 'Google sign-in complete',
+        body: 'You signed in with Google successfully.',
+        balancedTitle: 'Google sign-in',
+        balancedBody: 'Your Google account is connected to Qureo.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to continue.',
+        route: '/home',
+        data: {
+          event: created ? 'google_signup' : 'google_signin',
+          email,
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[auth] push failed after google auth:', notifyError?.message || notifyError);
+    }
 
     res.json({
       user: serializeUser(user),

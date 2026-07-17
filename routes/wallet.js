@@ -425,6 +425,27 @@ router.post("/top-up", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    try {
+      await notifyUser({
+        userId: reciverId,
+        type: 'wallet_funded',
+        title: 'Wallet funded successfully',
+        body: `Your wallet received ${amount}.`,
+        balancedTitle: 'Wallet funded',
+        balancedBody: 'Your wallet balance was increased.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your wallet update.',
+        route: '/health-wallet',
+        data: {
+          transactionId: String(transaction._id),
+          amount: String(amount),
+          senderName: String(senderName || ''),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[wallet] push failed after top-up:', notifyError?.message || notifyError);
+    }
+
     // ✅ Send a proper response back
     return res.status(200).json({
       success: true,
@@ -819,6 +840,27 @@ router.post('/funding-source/add', async (req, res) => {
       await transaction.save({ session });
       await session.commitTransaction();
       session.endSession();
+
+      try {
+        await notifyUser({
+          userId,
+          type: 'wallet_funded',
+          title: 'Wallet funded successfully',
+          body: `Your wallet was funded with $${Number(amount).toFixed(2)}.`,
+          balancedTitle: 'Wallet funded',
+          balancedBody: 'Your wallet balance was increased.',
+          genericTitle: 'You have a new update in Qureo',
+          genericBody: 'Open Qureo to view your wallet update.',
+          route: '/health-wallet',
+          data: {
+            transactionId: String(transaction._id),
+            amount: String(Number(amount).toFixed(2)),
+            providerId: String(providerId),
+          },
+        });
+      } catch (notifyError) {
+        console.warn('[wallet] push failed after funding-source addition:', notifyError?.message || notifyError);
+      }
 
       return res.json({
         success: true,

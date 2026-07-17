@@ -51,6 +51,27 @@ router.post("/", async (req, res) => {
 
     await booking.save();
 
+    try {
+      await notifyUser({
+        userId: user,
+        type: 'lab_booking_created',
+        title: 'Lab test booked successfully',
+        body: 'Your lab booking has been created in Qureo.',
+        balancedTitle: 'Lab booking confirmed',
+        balancedBody: 'Your lab test booking was successful.',
+        genericTitle: 'You have a new update in Qureo',
+        genericBody: 'Open Qureo to view your lab booking details.',
+        route: '/lab-tests',
+        data: {
+          bookingId: String(booking._id),
+          testCount: String(fullTests.length),
+          preferredDate: String(preferredDate || ''),
+        },
+      });
+    } catch (notifyError) {
+      console.warn('[lab-bookings] push failed on booking create:', notifyError?.message || notifyError);
+    }
+
     res.status(201).json({ success: true, booking });
   } catch (error) {
     console.error("Error creating booking:", error);
