@@ -6,7 +6,7 @@ const User = require('../models/User');
 const NotificationToken = require('../models/NotificationToken');
 const HealthAlert = require('../models/HealthAlert');
 const sendEmail = require('../utils/email');
-const { sendPushToToken } = require('../utils/push');
+const { sendPushToToken } = require('../utils/pushService');
 
 const DEFAULT_GOAL = {
   primaryGoal: 'Improve Sleep',
