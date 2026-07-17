@@ -77,6 +77,11 @@ class DailyHealthTipService {
     const weeklyTarget = Number(goal?.weeklyTarget || DEFAULT_GOAL.weeklyTarget);
     const reminderTime = goal?.reminderTime || DEFAULT_GOAL.reminderTime;
 
+    // Use fallback if OpenAI is not configured
+    if (!openai) {
+      return { content: getFallbackTip(goal, currentDate), source: 'fallback' };
+    }
+
     try {
       const response = await openai.chat.completions.create({
         model: 'gpt-4.1-mini',
