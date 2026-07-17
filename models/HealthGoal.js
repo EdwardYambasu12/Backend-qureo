@@ -24,6 +24,20 @@ const healthGoalSchema = new mongoose.Schema(
       type: String,
       default: '08:00',
     },
+    habitTracker: {
+      selectedHabits: {
+        type: [String],
+        default: [],
+      },
+      reminderSettings: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+      },
+      updatedAt: {
+        type: Date,
+        default: null,
+      },
+    },
   },
   { timestamps: true }
 );
