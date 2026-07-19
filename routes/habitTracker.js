@@ -329,12 +329,16 @@ router.get('/config', auth, async (req, res) => {
 
     const selectedHabits = normalizeSelectedHabits(goal?.habitTracker?.selectedHabits || []);
     const reminderSettings = goal?.habitTracker?.reminderSettings || {};
+    const timezone = typeof goal?.habitTracker?.timezone === 'string' && goal.habitTracker.timezone.trim()
+      ? goal.habitTracker.timezone
+      : 'UTC';
 
     res.json({
       success: true,
       config: {
         selectedHabits,
         reminderSettings,
+        timezone,
         primaryGoal: goal.primaryGoal,
         weeklyTarget: goal.weeklyTarget,
         reminderTime: goal.reminderTime,
@@ -349,15 +353,17 @@ router.get('/config', auth, async (req, res) => {
 router.put('/config', auth, async (req, res) => {
   try {
     const userId = req.userId || req.user?._id;
-    const { selectedHabits, reminderSettings = {}, primaryGoal, weeklyTarget, reminderTime } = req.body || {};
+    const { selectedHabits, reminderSettings = {}, primaryGoal, weeklyTarget, reminderTime, timezone } = req.body || {};
 
     const goal = await getOrCreateGoal(userId);
     const normalizedSelectedHabits = normalizeSelectedHabits(selectedHabits || goal?.habitTracker?.selectedHabits);
+    const safeTimezone = typeof timezone === 'string' && timezone.trim() ? timezone.trim() : goal?.habitTracker?.timezone || 'UTC';
 
     const normalizedReminderSettings = normalizeReminderSettings(normalizedSelectedHabits, reminderSettings);
 
     goal.habitTracker = {
       selectedHabits: normalizedSelectedHabits,
+      timezone: safeTimezone,
       reminderSettings: normalizedReminderSettings,
       updatedAt: new Date(),
     };
@@ -380,6 +386,7 @@ router.put('/config', auth, async (req, res) => {
       success: true,
       config: {
         selectedHabits: goal.habitTracker.selectedHabits,
+        timezone: goal.habitTracker.timezone,
         reminderSettings: goal.habitTracker.reminderSettings,
         primaryGoal: goal.primaryGoal,
         weeklyTarget: goal.weeklyTarget,

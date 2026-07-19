@@ -1,8 +1,10 @@
 const Medication = require('../models/Medication');
+const HealthGoal = require('../models/HealthGoal');
 const Profile = require('../models/Profile');
 const User = require('../models/User');
 const NotificationToken = require('../models/NotificationToken');
 const ReminderDispatch = require('../models/ReminderDispatch');
+const HabitReminderDispatch = require('../models/HabitReminderDispatch');
 const sendEmail = require('../utils/email');
 const { sendPushToToken } = require('../utils/pushService');
 
@@ -42,6 +44,156 @@ const formatTimeKeyInTimezone = (date, timezone) => {
   const minute = parts.find((p) => p.type === 'minute')?.value;
   return `${hour}:${minute}`;
 };
+
+const getTimezoneWeekdayShort = (date, timezone) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short',
+  });
+
+  return formatter.format(date);
+};
+
+const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const timeKeyToMinutes = (timeKey) => {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(timeKey || ''));
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const minutesToTimeKey = (minutes) => {
+  const normalized = ((minutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const hours = Math.floor(normalized / 60);
+  const mins = normalized % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+};
+
+const intervalToMinutes = (interval) => {
+  const lookup = {
+    '30 mins': 30,
+    '1 hour': 60,
+    '2 hours': 120,
+    '3 hours': 180,
+    '4 hours': 240,
+  };
+  return lookup[interval] || null;
+};
+
+const isTodayAllowed = (repeat, customDays, now = new Date()) => {
+  const dayName = SHORT_DAY_NAMES[now.getDay()];
+  if (repeat === 'Weekdays') return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(dayName);
+  if (repeat === 'Weekends') return ['Sat', 'Sun'].includes(dayName);
+  if (repeat === 'Custom') return Array.isArray(customDays) && customDays.includes(dayName);
+  return true;
+};
+
+const isTodayAllowedInTimezone = (repeat, customDays, now = new Date(), timezone = 'UTC') => {
+  const dayName = getTimezoneWeekdayShort(now, timezone);
+  if (repeat === 'Weekdays') return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(dayName);
+  if (repeat === 'Weekends') return ['Sat', 'Sun'].includes(dayName);
+  if (repeat === 'Custom') return Array.isArray(customDays) && customDays.includes(dayName);
+  return true;
+};
+
+const isValidTimezone = (timezone) => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const normalizeReminderTimes = (timeList = []) =>
+  [...new Set(timeList.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+
+const buildWaterReminderTimes = (settings = {}) => {
+  const intervalMinutes = intervalToMinutes(settings.interval);
+  const startMinutes = timeKeyToMinutes(settings.startTime || settings.time || '09:00');
+  const endMinutes = timeKeyToMinutes(settings.endTime || '21:00');
+
+  if (!intervalMinutes || startMinutes === null || endMinutes === null) {
+    return [settings.time || settings.startTime || '09:00'].filter(Boolean);
+  }
+
+  const times = [];
+  for (let minutes = startMinutes; minutes <= endMinutes; minutes += intervalMinutes) {
+    times.push(minutesToTimeKey(minutes));
+  }
+  return times;
+};
+
+const buildHabitReminderEntries = (habitKey, settings = {}) => {
+  const repeat = settings.repeat || 'Daily';
+  const customDays = Array.isArray(settings.customDays) ? settings.customDays : [];
+
+  if (!settings || settings.enabled === false) return [];
+
+  if (habitKey === 'sleep') {
+    return normalizeReminderTimes([
+      settings.sleepReminderEnabled === false ? null : settings.sleepTime || '22:00',
+      settings.wakeReminderEnabled === false ? null : settings.wakeTime || '06:30',
+    ]).map((time) => ({
+      reminderKey: time === (settings.wakeTime || '06:30') ? 'wake-now' : 'sleep-now',
+      label: time === (settings.wakeTime || '06:30') ? 'Wake Now' : 'Sleep Now',
+      time,
+    }));
+  }
+
+  if (habitKey === 'water') {
+    return buildWaterReminderTimes(settings).map((time) => ({
+      reminderKey: `water-${time}`,
+      label: 'Drink Water',
+      time,
+    }));
+  }
+
+  if (habitKey === 'medication' && Array.isArray(settings.slots) && settings.slots.length) {
+    return normalizeReminderTimes(settings.slots).map((time) => ({
+      reminderKey: `slot-${time}`,
+      label: 'Medication',
+      time,
+    }));
+  }
+
+  const baseTime = settings.time || settings.startTime || null;
+  return baseTime ? [{ reminderKey: `time-${baseTime}`, label: 'Reminder', time: baseTime }] : [];
+};
+
+const buildHabitReminderMessage = (habitTitle, reminderLabel, timeKey) => {
+  if (reminderLabel === 'Sleep Now') {
+    return {
+      title: 'Sleep Reminder',
+      body: `It is time to sleep now. ${habitTitle} is due at ${timeKey}.`,
+    };
+  }
+
+  if (reminderLabel === 'Wake Now') {
+    return {
+      title: 'Wake Reminder',
+      body: `It is time to wake up now. ${habitTitle} is due at ${timeKey}.`,
+    };
+  }
+
+  if (habitTitle === 'Drink Water') {
+    return {
+      title: 'Hydration Reminder',
+      body: `Drink water now. Your next habit reminder is due at ${timeKey}.`,
+    };
+  }
+
+  return {
+    title: `Habit Reminder: ${habitTitle}`,
+    body: `${habitTitle} is due now (${timeKey}).`,
+  };
+};
+
+const humanizeHabitKey = (habitKey) =>
+  String(habitKey || '')
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (char) => char.toUpperCase())
+    .trim() || 'Habit';
 
 class ReminderNotificationScheduler {
   constructor() {
@@ -106,6 +258,19 @@ class ReminderNotificationScheduler {
     return Boolean(found);
   }
 
+  async alreadyDispatchedHabit({ userId, habitKey, reminderKey, reminderDate, reminderTime, channel }) {
+    const found = await HabitReminderDispatch.findOne({
+      user: userId,
+      habitKey,
+      reminderKey,
+      reminderDate,
+      reminderTime,
+      channel,
+    }).lean();
+
+    return Boolean(found);
+  }
+
   async recordDispatch({ userId, medicationId, reminderDate, reminderTime, channel, success, reason = '' }) {
     try {
       await ReminderDispatch.create({
@@ -120,6 +285,106 @@ class ReminderNotificationScheduler {
     } catch (err) {
       if (err?.code !== 11000) {
         console.error('Reminder dispatch log error:', err.message || err);
+      }
+    }
+  }
+
+  async recordHabitDispatch({ userId, habitKey, reminderKey, reminderDate, reminderTime, success, reason = '' }) {
+    try {
+      await HabitReminderDispatch.create({
+        user: userId,
+        habitKey,
+        reminderKey,
+        reminderDate,
+        reminderTime,
+        channel: 'push',
+        success,
+        reason,
+      });
+    } catch (err) {
+      if (err?.code !== 11000) {
+        console.error('Habit reminder dispatch log error:', err.message || err);
+      }
+    }
+  }
+
+  async processHabitTrackerReminders() {
+    const now = new Date();
+    const dateKeyCache = new Map();
+    const timeKeyCache = new Map();
+
+    const goals = await HealthGoal.find({ 'habitTracker.reminderSettings': { $exists: true } }).lean();
+    if (!goals.length) return;
+
+    for (const goal of goals) {
+      const reminderSettings = goal?.habitTracker?.reminderSettings || {};
+      const timezone = isValidTimezone(goal?.habitTracker?.timezone) ? goal.habitTracker.timezone : 'UTC';
+      const dateKey = dateKeyCache.get(timezone) || formatDateKeyInTimezone(now, timezone);
+      const currentTime = timeKeyCache.get(timezone) || formatTimeKeyInTimezone(now, timezone);
+      dateKeyCache.set(timezone, dateKey);
+      timeKeyCache.set(timezone, currentTime);
+      const selectedHabits = Array.isArray(goal?.habitTracker?.selectedHabits) && goal.habitTracker.selectedHabits.length
+        ? goal.habitTracker.selectedHabits
+        : Object.keys(reminderSettings);
+
+      const profile = await Profile.findOne({ user: goal.user }).lean();
+      const notifications = profile?.notifications || {};
+
+      if (notifications.reminders === false || notifications.push === false) {
+        this.stats.skipped += 1;
+        continue;
+      }
+
+      const tokenDoc = await NotificationToken.findOne({ userId: goal.user }).lean();
+      if (!tokenDoc?.token) {
+        this.stats.skipped += 1;
+        continue;
+      }
+
+      for (const habitKey of selectedHabits) {
+        const settings = reminderSettings[habitKey] || {};
+        if (!isTodayAllowedInTimezone(settings.repeat || 'Daily', settings.customDays, now, timezone)) continue;
+
+        const habitTitle = humanizeHabitKey(habitKey);
+
+        const entries = buildHabitReminderEntries(habitKey, settings)
+          .filter((item) => item.time === currentTime);
+
+        for (const entry of entries) {
+          const alreadyPush = await this.alreadyDispatchedHabit({
+            userId: goal.user,
+            habitKey,
+            reminderKey: entry.reminderKey,
+            reminderDate: dateKey,
+            reminderTime: currentTime,
+            channel: 'push',
+          });
+
+          if (alreadyPush) continue;
+
+          const message = buildHabitReminderMessage(habitTitle, entry.label, currentTime);
+          const pushResult = await sendPushToToken(tokenDoc.token, message.title, message.body, {
+            type: 'habit_reminder',
+            habitKey,
+            reminderKey: entry.reminderKey,
+            reminderLabel: entry.label,
+            dueTime: currentTime,
+            route: '/health-tips',
+          });
+
+          await this.recordHabitDispatch({
+            userId: goal.user,
+            habitKey,
+            reminderKey: entry.reminderKey,
+            reminderDate: dateKey,
+            reminderTime: currentTime,
+            success: Boolean(pushResult.success),
+            reason: pushResult.reason || '',
+          });
+
+          if (pushResult.success) this.stats.pushSent += 1;
+          else this.stats.pushFailed += 1;
+        }
       }
     }
   }
@@ -230,6 +495,7 @@ class ReminderNotificationScheduler {
       this.lastRun = new Date();
       this.stats.runs += 1;
       await this.processDueReminders();
+      await this.processHabitTrackerReminders();
     } catch (err) {
       console.error('ReminderNotificationScheduler tick error:', err);
     } finally {

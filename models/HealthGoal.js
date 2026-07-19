@@ -29,6 +29,10 @@ const healthGoalSchema = new mongoose.Schema(
         type: [String],
         default: [],
       },
+      timezone: {
+        type: String,
+        default: 'UTC',
+      },
       reminderSettings: {
         type: mongoose.Schema.Types.Mixed,
         default: {},
