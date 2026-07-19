@@ -89,6 +89,7 @@ function normalizeSelectedHabits(input) {
 function normalizeReminderSettings(selectedHabits, reminderSettings) {
   const result = {};
   const source = reminderSettings && typeof reminderSettings === 'object' ? reminderSettings : {};
+  const isValidTime = (value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value || ''));
 
   selectedHabits.forEach((habitKey) => {
     const incoming = source[habitKey] && typeof source[habitKey] === 'object' ? source[habitKey] : {};
@@ -100,9 +101,9 @@ function normalizeReminderSettings(selectedHabits, reminderSettings) {
     const normalized = {
       enabled: incoming.enabled !== false,
       repeat,
-      time: /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(incoming.time || '')) ? incoming.time : '08:00',
-      startTime: /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(incoming.startTime || '')) ? incoming.startTime : '08:00',
-      endTime: /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(incoming.endTime || '')) ? incoming.endTime : '20:00',
+      time: isValidTime(incoming.time) ? incoming.time : '08:00',
+      startTime: isValidTime(incoming.startTime) ? incoming.startTime : '08:00',
+      endTime: isValidTime(incoming.endTime) ? incoming.endTime : '20:00',
       customDays,
     };
 
@@ -113,11 +114,18 @@ function normalizeReminderSettings(selectedHabits, reminderSettings) {
 
     if (habitKey === 'medication') {
       normalized.slots = Array.isArray(incoming.slots)
-        ? incoming.slots.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value))).slice(0, 5)
+        ? incoming.slots.filter((value) => isValidTime(value)).slice(0, 5)
         : [];
       if (!normalized.slots.length) {
         normalized.slots = [normalized.time];
       }
+    }
+
+    if (habitKey === 'sleep') {
+      normalized.sleepReminderEnabled = incoming.sleepReminderEnabled !== false;
+      normalized.sleepTime = isValidTime(incoming.sleepTime) ? incoming.sleepTime : '22:00';
+      normalized.wakeReminderEnabled = incoming.wakeReminderEnabled !== false;
+      normalized.wakeTime = isValidTime(incoming.wakeTime) ? incoming.wakeTime : '06:30';
     }
 
     result[habitKey] = normalized;
@@ -414,6 +422,33 @@ router.get('/dashboard', auth, async (req, res) => {
         const repeat = settings?.repeat || 'Daily';
         const enabled = settings?.enabled !== false;
         if (!enabled) return [];
+
+        if (habitKey === 'sleep') {
+          const items = [];
+          if (settings?.sleepReminderEnabled !== false && settings?.sleepTime) {
+            items.push({
+              habitKey,
+              title,
+              trigger: 'sleep-now',
+              label: 'Sleep Now',
+              time: settings.sleepTime,
+              repeat,
+              enabled,
+            });
+          }
+          if (settings?.wakeReminderEnabled !== false && settings?.wakeTime) {
+            items.push({
+              habitKey,
+              title,
+              trigger: 'wake-now',
+              label: 'Wake Now',
+              time: settings.wakeTime,
+              repeat,
+              enabled,
+            });
+          }
+          return items;
+        }
 
         if (habitKey === 'medication' && Array.isArray(settings?.slots) && settings.slots.length) {
           return settings.slots.map((slot) => ({
