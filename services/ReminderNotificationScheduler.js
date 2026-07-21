@@ -69,6 +69,16 @@ const minutesToTimeKey = (minutes) => {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 };
 
+const isWithinReminderWindow = (scheduledTimeKey, currentTimeKey, windowMinutes = 1) => {
+  const scheduled = timeKeyToMinutes(scheduledTimeKey);
+  const current = timeKeyToMinutes(currentTimeKey);
+  if (scheduled === null || current === null) return false;
+
+  const directDelta = Math.abs(scheduled - current);
+  const wrappedDelta = (24 * 60) - directDelta;
+  return Math.min(directDelta, wrappedDelta) <= Math.max(0, Number(windowMinutes) || 0);
+};
+
 const intervalToMinutes = (interval) => {
   const lookup = {
     '30 mins': 30,
@@ -180,6 +190,13 @@ const buildHabitReminderMessage = (habitTitle, reminderLabel, timeKey) => {
     return {
       title: 'Hydration Reminder',
       body: `Drink water now. Your next habit reminder is due at ${timeKey}.`,
+    };
+  }
+
+  if (habitTitle === 'Exercise') {
+    return {
+      title: 'Exercise Reminder',
+      body: `Time to move. Your exercise reminder is due at ${timeKey}.`,
     };
   }
 
@@ -348,7 +365,7 @@ class ReminderNotificationScheduler {
         const habitTitle = humanizeHabitKey(habitKey);
 
         const entries = buildHabitReminderEntries(habitKey, settings)
-          .filter((item) => item.time === currentTime);
+          .filter((item) => isWithinReminderWindow(item.time, currentTime, 1));
 
         for (const entry of entries) {
           const alreadyPush = await this.alreadyDispatchedHabit({
@@ -356,19 +373,19 @@ class ReminderNotificationScheduler {
             habitKey,
             reminderKey: entry.reminderKey,
             reminderDate: dateKey,
-            reminderTime: currentTime,
+            reminderTime: entry.time,
             channel: 'push',
           });
 
           if (alreadyPush) continue;
 
-          const message = buildHabitReminderMessage(habitTitle, entry.label, currentTime);
+          const message = buildHabitReminderMessage(habitTitle, entry.label, entry.time);
           const pushResult = await sendPushToToken(tokenDoc.token, message.title, message.body, {
             type: 'habit_reminder',
             habitKey,
             reminderKey: entry.reminderKey,
             reminderLabel: entry.label,
-            dueTime: currentTime,
+            dueTime: entry.time,
             route: '/health-tips',
           });
 
@@ -377,7 +394,7 @@ class ReminderNotificationScheduler {
             habitKey,
             reminderKey: entry.reminderKey,
             reminderDate: dateKey,
-            reminderTime: currentTime,
+            reminderTime: entry.time,
             success: Boolean(pushResult.success),
             reason: pushResult.reason || '',
           });
