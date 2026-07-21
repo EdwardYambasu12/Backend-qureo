@@ -115,11 +115,17 @@ class DailyHealthTipService {
   async sendNewTipNotifications(userId, tipDoc) {
     const profile = await Profile.findOne({ user: userId }).lean();
     const notifications = profile?.notifications || {};
+    const pushEnabled = notifications.push !== false;
+    const tipNotificationsEnabled =
+      notifications.insights !== false ||
+      notifications.reminders !== false ||
+      notifications.healthTips !== false;
 
     const title = '💡 New Daily Health Tip';
     const body = tipDoc.content;
+    let notificationSent = false;
 
-    await HealthAlert.create({
+    const alert = await HealthAlert.create({
       user: userId,
       type: 'health_insight',
       title,
@@ -133,17 +139,20 @@ class DailyHealthTipService {
       notificationSent: false,
     });
 
-    if (notifications.reminders === false) {
+    if (!tipNotificationsEnabled) {
       return;
     }
 
-    if (notifications.push !== false) {
+    if (pushEnabled) {
       const tokenDoc = await NotificationToken.findOne({ userId }).lean();
       if (tokenDoc?.token) {
-        await sendPushToToken(tokenDoc.token, title, body, {
+        const pushResult = await sendPushToToken(tokenDoc.token, title, body, {
           type: 'daily_health_tip',
           tipDate: tipDoc.tipDate.toISOString(),
+          route: '/health-tips',
         });
+
+        notificationSent = Boolean(pushResult?.success);
       }
     }
 
@@ -156,7 +165,15 @@ class DailyHealthTipService {
           body,
           `<p><strong>Your daily health tip:</strong></p><p>${body}</p><p>Goal: ${tipDoc.primaryGoal}</p>`
         );
+        notificationSent = true;
       }
+    }
+
+    if (notificationSent) {
+      await HealthAlert.updateOne(
+        { _id: alert._id },
+        { $set: { notificationSent: true, notificationType: pushEnabled ? 'push' : 'email' } }
+      );
     }
   }
 
