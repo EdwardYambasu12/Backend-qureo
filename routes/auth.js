@@ -249,4 +249,13 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+router.post("/delete-user/:id", ()=>{
+  User.findByIdAndDelete(req.params.id).then(() => {
+    res.json({ message: "User deleted successfully" });
+  }).catch((err) => {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  });
+})
+
 module.exports = router;

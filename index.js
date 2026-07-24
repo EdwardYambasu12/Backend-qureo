@@ -94,7 +94,7 @@ app.delete("/api/delete-account", auth, async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Account deleted successfully",
+      message: "Account deleted successfully and logged out",
     });
   } catch (error) {
     console.error("Delete account error:", error);
