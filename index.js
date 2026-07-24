@@ -15,6 +15,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const Transaction = require("./models/Transaction")
 const Wallet = require("./models/Wallet")
 const User = require("./models/User")
+const Profile = require("./models/Profile")
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
@@ -79,26 +80,52 @@ const auth = authMiddleware;
 
 app.delete("/api/delete-account", auth, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.query.userId;
+    
+    console.log(userId, "this user is requesting delete")
+
+    const list_of_users = await User.find()
+    //console.log("this is the list of available users", list_of_users)
+
+    list_of_users.filter((id)=>{
+      console.log(id, "ids")
+      if (id._id == userId) {
+        console.log(id, "this user is requesting delete", id)
+      }
+    })
+
+
+    const profile = await Profile.find({ user: userId });
+    if (profile) {
+      await Profile.findOneAndDelete({ user: userId });
+      console.log("found this profile", profile)
+    }
 
     const user = await User.findById(userId);
+    console.log(user)
+
 
     if (!user) {
+
+       console.log("user not found")
       return res.status(404).json({
         success: false,
         message: "User not found",
+       
       });
+
     }
 
     await User.findByIdAndDelete(userId);
-
+    console.log("found this user", user)
+    console.log("account deleted successfully")
     return res.json({
       success: true,
       message: "Account deleted successfully and logged out",
     });
   } catch (error) {
     console.error("Delete account error:", error);
-
+    console.log("error")
     return res.status(500).json({
       success: false,
       message: "Failed to delete account",
