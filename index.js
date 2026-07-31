@@ -16,6 +16,34 @@ const Transaction = require("./models/Transaction")
 const Wallet = require("./models/Wallet")
 const User = require("./models/User")
 const Profile = require("./models/Profile")
+const Activities = require("./models/Activities")
+const BookingLabtest = require("./models/BookingLabtest")
+const Cart = require("./models/Cart")
+const Consultations = require("./models/Consultations")
+const DailyHealthTip = require("./models/DailyHealthTip")
+const Dependent = require("./models/Dependent")
+const HabitReminderDispatch = require("./models/HabitReminderDispatch")
+const HabitTrackerEntry = require("./models/HabitTrackerEntry")
+const HealthAlert = require("./models/HealthAlert")
+const HealthAssessment = require("./models/HealthAssessment")
+const HealthGoal = require("./models/HealthGoal")
+const HealthPlan = require("./models/HealthPlan")
+const InsuranceClaim = require("./models/InsuranceClaim")
+const InsuranceSubscription = require("./models/InsuranceSubscription")
+const LinkedDevice = require("./models/LinkedDevice")
+const Medication = require("./models/Medication")
+const NotificationEvent = require("./models/NotificationEvent")
+const NotificationToken = require("./models/NotificationToken")
+const Order = require("./models/Order")
+const PaymentCard = require("./models/PaymentCard")
+const Prescription = require("./models/Prescription")
+const ReminderDispatch = require("./models/ReminderDispatch")
+const ScannedDocuments = require("./models/ScannedDocuments")
+const SecuritySettings = require("./models/SecuritySettings")
+const SupportTicket = require("./models/SupportTicket")
+const SymptomChat = require("./models/SymptomChat")
+const UserMedication = require("./models/UserMedication")
+const Vitals = require("./models/Vitals")
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
@@ -71,7 +99,6 @@ const ReminderNotificationScheduler = require('./services/ReminderNotificationSc
 const DailyHealthTipScheduler = require('./services/DailyHealthTipScheduler');
 const ConsultationReminderScheduler = require('./services/ConsultationReminderScheduler');
 const TestPushBroadcastScheduler = require('./services/TestPushBroadcastScheduler');
-const HealthAlert = require('./models/HealthAlert');
 
 // -------------------- Express app --------------------
 const app = express();
@@ -80,52 +107,78 @@ const auth = authMiddleware;
 
 app.delete("/api/delete-account", auth, async (req, res) => {
   try {
-    const userId = req.query.userId;
-    
-    console.log(userId, "this user is requesting delete")
-
-    const list_of_users = await User.find()
-    //console.log("this is the list of available users", list_of_users)
-
-    list_of_users.filter((id)=>{
-      console.log(id, "ids")
-      if (id._id == userId) {
-        console.log(id, "this user is requesting delete", id)
-      }
-    })
-
-
-    const profile = await Profile.find({ user: userId });
-    if (profile) {
-      await Profile.findOneAndDelete({ user: userId });
-      console.log("found this profile", profile)
+    const userId = req.userId || req.query.userId || req.body?.userId;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid user id is required to delete an account",
+      });
     }
 
-    const user = await User.findById(userId);
-    console.log(user)
-
-
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+    const user = await User.findById(objectUserId);
     if (!user) {
-
-       console.log("user not found")
       return res.status(404).json({
         success: false,
         message: "User not found",
-       
       });
-
     }
 
-    await User.findByIdAndDelete(userId);
-    console.log("found this user", user)
-    console.log("account deleted successfully")
+    const cleanupTasks = [
+      Profile.deleteMany({ user: objectUserId }),
+      HealthAssessment.deleteMany({ user: objectUserId }),
+      Activities.deleteMany({ userId: objectUserId }),
+      BookingLabtest.deleteMany({ user: objectUserId }),
+      Cart.deleteMany({ user: objectUserId }),
+      Consultations.deleteMany({ patient: objectUserId }),
+      DailyHealthTip.deleteMany({ user: objectUserId }),
+      Dependent.deleteMany({ owner: objectUserId }),
+      HabitReminderDispatch.deleteMany({ user: objectUserId }),
+      HabitTrackerEntry.deleteMany({ user: objectUserId }),
+      HealthAlert.deleteMany({ user: objectUserId }),
+      HealthGoal.deleteMany({ user: objectUserId }),
+      HealthPlan.deleteMany({ user: objectUserId }),
+      InsuranceClaim.deleteMany({ user: objectUserId }),
+      InsuranceSubscription.deleteMany({ user: objectUserId }),
+      LinkedDevice.deleteMany({ user: objectUserId }),
+      Medication.deleteMany({ user: objectUserId }),
+      NotificationEvent.deleteMany({ userId: objectUserId }),
+      NotificationToken.deleteMany({ userId: objectUserId }),
+      Order.deleteMany({ user: objectUserId }),
+      PaymentCard.deleteMany({ user: objectUserId }),
+      Prescription.deleteMany({
+        $or: [
+          { owner: String(userId) },
+          { patientId: objectUserId },
+        ],
+      }),
+      ReminderDispatch.deleteMany({ user: objectUserId }),
+      ScannedDocuments.deleteMany({ user_id: objectUserId }),
+      SecuritySettings.deleteMany({ user: objectUserId }),
+      SupportTicket.deleteMany({ user: objectUserId }),
+      SymptomChat.deleteMany({ user: objectUserId }),
+      Transaction.deleteMany({ user: objectUserId }),
+      UserMedication.deleteMany({ user: objectUserId }),
+      Vitals.deleteMany({ user: objectUserId }),
+      Wallet.deleteMany({
+        $or: [
+          { user: objectUserId },
+          { user: String(userId) },
+        ],
+      }),
+    ];
+
+    const cleanupResults = await Promise.all(cleanupTasks);
+    const deletedRecords = cleanupResults.reduce((sum, result) => sum + (result?.deletedCount || 0), 0);
+    await User.findByIdAndDelete(objectUserId);
+
     return res.json({
       success: true,
-      message: "Account deleted successfully and logged out",
+      message: "Account deleted successfully",
+      deletedRecords,
     });
   } catch (error) {
     console.error("Delete account error:", error);
-    console.log("error")
     return res.status(500).json({
       success: false,
       message: "Failed to delete account",
