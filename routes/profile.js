@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Profile = require('../models/Profile');
+const auth = require('../middleware/auth');
 
 // GET /api/profile/all - get all user profiles (admin)
 router.get('/all', async (req, res) => {
@@ -14,9 +15,9 @@ router.get('/all', async (req, res) => {
 });
 
 // GET /api/profile - get current user's profile
-router.get('/', async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const { userId } = req.query || req.body;
+    const userId = req.userId;
     if (!userId) return res.status(400).json({ message: 'userId required' });
     
     const profile = await Profile.findOne({ user: userId });
@@ -29,9 +30,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/profile - create or update profile
-router.post('/', async (req, res) => {
+router.post('/', auth, async (req, res) => {
   try {
-    const { userId, ...data } = req.body;
+    const { userId: _ignoredUserId, ...data } = req.body;
+    const userId = req.userId;
     if (!userId) return res.status(400).json({ message: 'userId required' });
     
     let profile = await Profile.findOne({ user: userId });
@@ -49,9 +51,10 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /api/profile/avatar - update only the avatar field (accepts URL/base64)
-router.patch('/avatar', async (req, res) => {
+router.patch('/avatar', auth, async (req, res) => {
   try {
-    const { userId, avatar } = req.body;
+    const { avatar } = req.body;
+    const userId = req.userId;
     if (!avatar) return res.status(400).json({ message: 'avatar is required' });
     if (!userId) return res.status(400).json({ message: 'userId required' });
     
@@ -70,9 +73,10 @@ router.patch('/avatar', async (req, res) => {
 });
 
 // PATCH /api/profile/notifications - update notification preferences
-router.patch('/notifications', async (req, res) => {
+router.patch('/notifications', auth, async (req, res) => {
   try {
-    const { userId, notifications } = req.body;
+    const { notifications } = req.body;
+    const userId = req.userId;
     if (!notifications || typeof notifications !== 'object') return res.status(400).json({ message: 'notifications object is required' });
     if (!userId) return res.status(400).json({ message: 'userId required' });
     let profile = await Profile.findOne({ user: userId });

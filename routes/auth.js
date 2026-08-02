@@ -1,11 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const { notifyUser } = require('../utils/notifyUser');
+const auth = require('../middleware/auth');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  process.env.AUTH_SECRET ||
+  (process.env.NODE_ENV === 'production' ? '' : 'qureo-local-dev-auth-secret');
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 function serializeUser(user) {
   return {
@@ -14,6 +21,22 @@ function serializeUser(user) {
     email: user.email,
     authProvider: user.authProvider || 'password',
   };
+}
+
+function issueToken(user) {
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET or AUTH_SECRET is required');
+  }
+
+  return jwt.sign(
+    {
+      sub: String(user._id),
+      email: user.email,
+      authProvider: user.authProvider || 'password',
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
 }
 
 async function verifyGoogleToken(idToken) {
@@ -60,7 +83,6 @@ async function fetchGoogleProfileFromAccessToken(accessToken) {
   return payload;
 }
 
-// POST /api/auth/signup (no JWT)
 router.post('/signup', async (req, res) => {
   const { fullName, email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
@@ -96,7 +118,8 @@ router.post('/signup', async (req, res) => {
     }
 
     res.json({
-      user: serializeUser(user)
+      user: serializeUser(user),
+      token: issueToken(user),
     });
 
     try {
@@ -124,7 +147,6 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// POST /api/auth/signin (no JWT)
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
@@ -141,7 +163,8 @@ router.post('/signin', async (req, res) => {
     if (!isMatch) return res.status(401).json({ message: 'Password not correct.' });
 
     res.json({
-      user: serializeUser(user)
+      user: serializeUser(user),
+      token: issueToken(user),
     });
   } catch (err) {
     console.error(err);
@@ -210,6 +233,7 @@ router.post('/google', async (req, res) => {
 
     res.json({
       user: serializeUser(user),
+      token: issueToken(user),
       created,
     });
   } catch (err) {
@@ -218,16 +242,9 @@ router.post('/google', async (req, res) => {
   }
 });
 
-// /me endpoint (no JWT verification - return user by ID from query)
-router.get('/me', async (req, res) => {
+router.get('/me', auth, async (req, res) => {
   try {
-    const userId = req.query?.userId || req.body?.userId;
-
-    if (!userId) {
-      return res.status(400).json({ message: 'userId required' });
-    }
-
-    const user = await User.findById(userId).select('-passwordHash -refreshToken');
+    const user = await User.findById(req.userId).select('-passwordHash -refreshToken');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }

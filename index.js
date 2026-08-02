@@ -105,88 +105,6 @@ const app = express();
 const server = createServer(app);
 const auth = authMiddleware;
 
-app.delete("/api/delete-account", auth, async (req, res) => {
-  try {
-    const userId = req.userId || req.query.userId || req.body?.userId;
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "A valid user id is required to delete an account",
-      });
-    }
-
-    const objectUserId = new mongoose.Types.ObjectId(userId);
-    const user = await User.findById(objectUserId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const cleanupTasks = [
-      Profile.deleteMany({ user: objectUserId }),
-      HealthAssessment.deleteMany({ user: objectUserId }),
-      Activities.deleteMany({ userId: objectUserId }),
-      BookingLabtest.deleteMany({ user: objectUserId }),
-      Cart.deleteMany({ user: objectUserId }),
-      Consultations.deleteMany({ patient: objectUserId }),
-      DailyHealthTip.deleteMany({ user: objectUserId }),
-      Dependent.deleteMany({ owner: objectUserId }),
-      HabitReminderDispatch.deleteMany({ user: objectUserId }),
-      HabitTrackerEntry.deleteMany({ user: objectUserId }),
-      HealthAlert.deleteMany({ user: objectUserId }),
-      HealthGoal.deleteMany({ user: objectUserId }),
-      HealthPlan.deleteMany({ user: objectUserId }),
-      InsuranceClaim.deleteMany({ user: objectUserId }),
-      InsuranceSubscription.deleteMany({ user: objectUserId }),
-      LinkedDevice.deleteMany({ user: objectUserId }),
-      Medication.deleteMany({ user: objectUserId }),
-      NotificationEvent.deleteMany({ userId: objectUserId }),
-      NotificationToken.deleteMany({ userId: objectUserId }),
-      Order.deleteMany({ user: objectUserId }),
-      PaymentCard.deleteMany({ user: objectUserId }),
-      Prescription.deleteMany({
-        $or: [
-          { owner: String(userId) },
-          { patientId: objectUserId },
-        ],
-      }),
-      ReminderDispatch.deleteMany({ user: objectUserId }),
-      ScannedDocuments.deleteMany({ user_id: objectUserId }),
-      SecuritySettings.deleteMany({ user: objectUserId }),
-      SupportTicket.deleteMany({ user: objectUserId }),
-      SymptomChat.deleteMany({ user: objectUserId }),
-      Transaction.deleteMany({ user: objectUserId }),
-      UserMedication.deleteMany({ user: objectUserId }),
-      Vitals.deleteMany({ user: objectUserId }),
-      Wallet.deleteMany({
-        $or: [
-          { user: objectUserId },
-          { user: String(userId) },
-        ],
-      }),
-    ];
-
-    const cleanupResults = await Promise.all(cleanupTasks);
-    const deletedRecords = cleanupResults.reduce((sum, result) => sum + (result?.deletedCount || 0), 0);
-    await User.findByIdAndDelete(objectUserId);
-
-    return res.json({
-      success: true,
-      message: "Account deleted successfully",
-      deletedRecords,
-    });
-  } catch (error) {
-    console.error("Delete account error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete account",
-    });
-  }
-});
-
-
 app.post(
   "/api/wallet/webhook",
   express.raw({ type: "application/json" }),
@@ -340,6 +258,87 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+app.delete("/api/delete-account", auth, async (req, res) => {
+  try {
+    const userId = req.userId || req.query.userId || req.body?.userId;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid user id is required to delete an account",
+      });
+    }
+
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+    const user = await User.findById(objectUserId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const cleanupTasks = [
+      Profile.deleteMany({ user: objectUserId }),
+      HealthAssessment.deleteMany({ user: objectUserId }),
+      Activities.deleteMany({ userId: objectUserId }),
+      BookingLabtest.deleteMany({ user: objectUserId }),
+      Cart.deleteMany({ user: objectUserId }),
+      Consultations.deleteMany({ patient: objectUserId }),
+      DailyHealthTip.deleteMany({ user: objectUserId }),
+      Dependent.deleteMany({ owner: objectUserId }),
+      HabitReminderDispatch.deleteMany({ user: objectUserId }),
+      HabitTrackerEntry.deleteMany({ user: objectUserId }),
+      HealthAlert.deleteMany({ user: objectUserId }),
+      HealthGoal.deleteMany({ user: objectUserId }),
+      HealthPlan.deleteMany({ user: objectUserId }),
+      InsuranceClaim.deleteMany({ user: objectUserId }),
+      InsuranceSubscription.deleteMany({ user: objectUserId }),
+      LinkedDevice.deleteMany({ user: objectUserId }),
+      Medication.deleteMany({ user: objectUserId }),
+      NotificationEvent.deleteMany({ userId: objectUserId }),
+      NotificationToken.deleteMany({ userId: objectUserId }),
+      Order.deleteMany({ user: objectUserId }),
+      PaymentCard.deleteMany({ user: objectUserId }),
+      Prescription.deleteMany({
+        $or: [
+          { owner: String(userId) },
+          { patientId: objectUserId },
+        ],
+      }),
+      ReminderDispatch.deleteMany({ user: objectUserId }),
+      ScannedDocuments.deleteMany({ user_id: objectUserId }),
+      SecuritySettings.deleteMany({ user: objectUserId }),
+      SupportTicket.deleteMany({ user: objectUserId }),
+      SymptomChat.deleteMany({ user: objectUserId }),
+      Transaction.deleteMany({ user: objectUserId }),
+      UserMedication.deleteMany({ user: objectUserId }),
+      Vitals.deleteMany({ user: objectUserId }),
+      Wallet.deleteMany({
+        $or: [
+          { user: objectUserId },
+          { user: String(userId) },
+        ],
+      }),
+    ];
+
+    const cleanupResults = await Promise.all(cleanupTasks);
+    const deletedRecords = cleanupResults.reduce((sum, result) => sum + (result?.deletedCount || 0), 0);
+    await User.findByIdAndDelete(objectUserId);
+
+    return res.json({
+      success: true,
+      message: "Account deleted successfully",
+      deletedRecords,
+    });
+  } catch (error) {
+    console.error("Delete account error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete account",
+    });
+  }
+});
 
 // -------------------- Routes --------------------
 app.use('/api/auth', authRoutes);
