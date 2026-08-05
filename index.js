@@ -108,6 +108,20 @@ const app = express();
 const server = createServer(app);
 const auth = authMiddleware;
 
+
+
+
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+
+
+
+
+
+
+
 app.post(
   "/api/wallet/webhook",
   express.raw({ type: "application/json" }),
