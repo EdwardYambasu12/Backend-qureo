@@ -222,6 +222,7 @@ app.use(cookieParser());
 // -------------------- CORS --------------------
 const allowedOrigins = [
   'https://app.qureohealth.com',
+  'https://qureohealth.com',
   'https://qureo.vercel.app',
   'https://qureodoctor.vercel.app',
   'https://qureodoctor.vercel.app',
