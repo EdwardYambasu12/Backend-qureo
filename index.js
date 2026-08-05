@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const Stripe = require("stripe")
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+
 //------------------------MODELS-----------------------//
 
 
@@ -44,10 +45,12 @@ const SupportTicket = require("./models/SupportTicket")
 const SymptomChat = require("./models/SymptomChat")
 const UserMedication = require("./models/UserMedication")
 const Vitals = require("./models/Vitals")
+
 // -------------------- Import existing routes --------------------
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 const assessmentRoutes = require('./routes/assessment');
+const earlyAccess = require('./routes/earlyAccess')
 const medicineRoutes = require('./routes/medicine');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/order');
@@ -345,6 +348,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/assessment', assessmentRoutes);
 app.use('/api/vitals', vitalsRoutes);
+app.use('/api/earlyaccess', earlyAccess)
 app.use('/api/health-alerts', healthAlertsRoutes);
 app.use('/api/health-plans', healthPlansRoutes);
 app.use('/api/medications', medicationsRoutes);
