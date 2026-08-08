@@ -95,7 +95,7 @@ const securitySettingsRoutes = require('./routes/securitySettings');
 const supportRoutes = require('./routes/support');
 const campaignsRoutes = require('./routes/campaigns');
 const nearbyClinicsRoutes = require('./routes/nearbyClinics');
-
+const newsLetter = require('./routes/newsletter');
 // Health Monitoring Services
 const HealthMonitoringScheduler = require('./services/HealthMonitoringScheduler');
 const ReminderNotificationScheduler = require('./services/ReminderNotificationScheduler');
@@ -403,6 +403,7 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/search', searchRoutes);
 app.use("/api/prescriptions", vision);
 app.use("/api/prescription", prescription)
+app.use("/api/newsletter", newsLetter);
 //app.use('/api/benefits', benefitsRoutes);
 //app.use('/api/providers', providerRoutes);
 //app.use('/api/notifications', notificationRoutes);
