@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const Medication = require('../models/Medication');
+const Medication = require('../models/UserMedication');
 const HealthAlert = require('../models/HealthAlert');
 const Vitals = require('../models/Vitals');
 const Consultation = require('../models/Consultations');
