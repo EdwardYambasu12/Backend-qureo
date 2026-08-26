@@ -130,6 +130,7 @@ router.post('/', auth, async (req, res) => {
       refillsRemaining,
     } = req.body;
 
+    console.log(req.body, "received medication")
     // Validate required fields
     if (!name || !dosage || !frequency || !scheduledTimes || !startDate) {
       return res.status(400).json({

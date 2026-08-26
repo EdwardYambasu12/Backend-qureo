@@ -3,29 +3,58 @@ const mongoose = require('mongoose');
 const vitalsSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    
-    // Vital measurements
-    bloodPressure: {
-      systolic: { type: Number },
-      diastolic: { type: Number },
-      raw: { type: String }, // Store as "120/80" for display
-    },
-    heartRate: { type: Number }, // bpm
-    temperature: { type: Number }, // Fahrenheit
-    oxygenLevel: { type: Number }, // percentage
-    bloodSugar: {
-      value: { type: Number },
-      unit: { type: String, enum: ['mg/dL', 'mmol/L'], default: 'mg/dL' },
-      readingType: {
-        type: String,
-        enum: ['fasting', 'random', 'postprandial', 'bedtime', 'other'],
-        default: 'other',
+
+    bloodPressure: [
+      {
+        systolic: { type: Number },
+        diastolic: { type: Number },
+        raw: { type: String },
+        measuredAt: { type: Date, default: Date.now },
       },
-      measuredAt: { type: Date, default: Date.now },
-    },
-    
-    // Additional health data
-    weight: { type: Number }, // kg
+    ],
+    heartRate: [
+      {
+        value: { type: Number },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+    temperature: [
+      {
+        value: { type: Number },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+    oxygenLevel: [
+      {
+        value: { type: Number },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+    bloodSugar: [
+      {
+        value: { type: Number },
+        unit: { type: String, enum: ['mg/dL', 'mmol/L'], default: 'mg/dL' },
+        readingType: {
+          type: String,
+          enum: ['fasting', 'random', 'postprandial', 'bedtime', 'other'],
+          default: 'other',
+        },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+    weight: [
+      {
+        value: { type: Number },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+    hydration: [
+      {
+        value: { type: Number },
+        measuredAt: { type: Date, default: Date.now },
+      },
+    ],
+
     symptoms: [
       {
         name: { type: String },
@@ -48,20 +77,15 @@ const vitalsSchema = new mongoose.Schema(
         recordedAt: { type: Date, default: Date.now },
       },
     ],
-    
-    hydration: { type: Number }, // ml per day
-    notes: { type: String },
-    
-    // Metadata
+
+    notes: [{ type: String }],
     source: { type: String, enum: ['manual', 'device', 'wearable'], default: 'manual' },
-    deviceName: { type: String }, // If from device
-    sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Doctors/care team
-    
+    deviceName: { type: String },
+    sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true }
 );
 
-// Index for efficient queries
 vitalsSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Vitals', vitalsSchema);

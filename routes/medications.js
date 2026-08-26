@@ -4,6 +4,7 @@ const UserMedication = require('../models/UserMedication');
 const auth = require('../middleware/auth');
 const { notifyUser } = require('../utils/notifyUser');
 
+
 const buildNotExpiredFilter = (now = new Date()) => ({
   $or: [
     { durationEndDate: { $exists: false } },
@@ -85,7 +86,8 @@ router.get('/:id', auth, async (req, res) => {
 
 // ✅ POST /api/medications - Add new medication
 router.post('/', auth, async (req, res) => {
-  try {
+    console.log("req body", req.body)  
+   try {
     const userId = req.userId;
     const {
       medicineName,

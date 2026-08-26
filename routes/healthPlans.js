@@ -25,6 +25,8 @@ const getTaskStats = (tasks = {}) => {
 // GET today's health plan for the user
 router.get('/today', auth, async (req, res) => {
   try {
+
+    console.log("being called")
     const userId = req.userId || req.user._id;
     const today = new Date();
     const dayStart = startOfDay(today);
