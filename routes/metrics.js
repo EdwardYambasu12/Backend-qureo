@@ -226,6 +226,8 @@ router.get('/dashboard', auth, async (req, res) => {
       ...buildNotExpiredFilter(now),
     });
 
+    console.log(activeMedications, "ACTIVE MEDICATIONS")
+
     // Get today's medications adherence
     const allMedications = await Medication.find({
       user: userId,
