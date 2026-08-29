@@ -12,6 +12,21 @@ const SERVICE_TYPE_ALIASES = {
   follow_up: 'consultation',
 };
 
+const getCoverageUsage = (subscription, serviceType) => {
+  const usage = subscription?.coverageUsed?.[serviceType] || {};
+  return Math.max(0, Number(usage.used || 0));
+};
+
+const calculateCoverage = (subscription, serviceType, amount) => {
+  const coverage = subscription?.plan?.coverageDetails?.find(
+    (entry) => entry.serviceType === serviceType
+  );
+  if (!coverage) return null;
+  const remaining = Math.max(0, Number(coverage.limit || 0) - getCoverageUsage(subscription, serviceType));
+  const requestedCoveredAmount = Number(amount || 0) * (Number(coverage.coveragePercentage || 0) / 100);
+  return { coverage, remaining, coveredAmount: Math.min(requestedCoveredAmount, remaining) };
+};
+
 // Get all insurance plans
 router.get('/plans', async (req, res) => {
   try {
@@ -618,9 +633,12 @@ router.put('/claims/:id/cancel', async (req, res) => {
 // Get coverage details
 router.get('/coverage', async (req, res) => {
   try {
+    const userId = req.query.userId || req.userId;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
     const subscription = await InsuranceSubscription.findOne({
-      user: req.userId,
-      status: 'active'
+      user: userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
     }).populate('plan');
 
     if (!subscription) {
@@ -628,7 +646,7 @@ router.get('/coverage', async (req, res) => {
     }
 
     const recentClaims = await InsuranceClaim.find({
-      user: req.userId,
+      user: userId,
       subscription: subscription._id
     })
     .sort({ createdAt: -1 })
@@ -672,23 +690,31 @@ router.post('/check-coverage', async (req, res) => {
       });
     }
 
-    const coverage = subscription.plan.coverageDetails.find(c => c.serviceType === normalizedServiceType || c.serviceType === String(serviceType || '').toLowerCase());
-    
-    if (!coverage) {
+    const calculation = calculateCoverage(subscription, normalizedServiceType, requestedAmount);
+    if (!calculation) {
       return res.json({
         covered: false,
         message: 'Service not covered'
       });
     }
 
-    const coveredAmount = requestedAmount * (coverage.coveragePercentage / 100);
+    const { coverage, remaining, coveredAmount } = calculation;
+    if (coveredAmount <= 0) {
+      return res.json({
+        covered: false,
+        message: 'Coverage limit exhausted',
+        limit: coverage.limit,
+        remaining: 0,
+      });
+    }
 
     res.json({
       covered: true,
       coveragePercentage: coverage.coveragePercentage,
       coveredAmount,
       yourCost: requestedAmount - coveredAmount,
-      limit: coverage.limit
+      limit: coverage.limit,
+      remaining
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -698,9 +724,12 @@ router.post('/check-coverage', async (req, res) => {
 // Get eligible services
 router.get('/coverage/eligible-services', async (req, res) => {
   try {
+    const userId = req.query.userId || req.userId;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
     const subscription = await InsuranceSubscription.findOne({
-      user: req.userId,
-      status: 'active'
+      user: userId,
+      status: 'active',
+      endDate: { $gte: new Date() },
     }).populate('plan');
 
     if (!subscription) {

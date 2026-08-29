@@ -363,7 +363,7 @@ const payload = {
   temperature: 0.7,
   max_tokens: 1200
 };
-    const apiKey = process.env.DAILY_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY || process.env.DAILY_API_KEY;
  
     if (!apiKey) return res.status(500).json({ message: 'OpenAI API key not configured on server.', options: [] });
     

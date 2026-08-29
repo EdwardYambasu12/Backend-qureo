@@ -379,24 +379,18 @@ router.post("/top-up", async (req, res) => {
 
   const session = await Wallet.startSession();
   session.startTransaction();
-  console.log(req.body.data, "data")
-
-  const body = req.body.data
+  // Accept the legacy wrapped body and the direct form body.
+  const body = req.body.data || req.body || {};
   try {
-    const { reciverId, amount, senderName, senderContact } = body;
-    console.log(reciverId)
-    if (!reciverId || !amount) {
+    const receiverId = body.receiverId || body.reciverId;
+    const { amount, senderName, senderContact, paymentMethod = 'external_transfer' } = body;
+    if (!receiverId || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    let wallet = await Wallet.findOne({ user: reciverId }).session(session);
+    let wallet = await Wallet.findOne({ user: receiverId }).session(session);
     if (!wallet) {
-      console.log(
-      "wallet not found"
-      )
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ success: false, message: "Wallet not found" });
+      wallet = new Wallet({ user: receiverId, balance: 0 });
     }
 
     const previousBalance = wallet.balance;
@@ -409,13 +403,13 @@ router.post("/top-up", async (req, res) => {
 
     const transaction = new Transaction({
       wallet: wallet._id,
-      user: reciverId,
+      user: receiverId,
       type: "deposit",
       amount: parseFloat(amount),
       previousBalance,
       newBalance,
       status: "completed",
-      paymentMethod: "-",
+      paymentMethod,
       description: `Deposit of ₦${amount} from ${senderName || "Unknown"}`,
       reference: `DEP-${Date.now()}`,
       completedAt: new Date(),
@@ -427,7 +421,7 @@ router.post("/top-up", async (req, res) => {
 
     try {
       await notifyUser({
-        userId: reciverId,
+        userId: receiverId,
         type: 'wallet_funded',
         title: 'Wallet funded successfully',
         body: `Your wallet received ${amount}.`,
@@ -1082,6 +1076,24 @@ router.get('/dependents', async (req, res) => {
     const { userId } = req.query;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
 
+    // A dependent can be added before they create their Qureo account. Resolve
+    // those pending links every time the owner opens the wallet.
+    const pendingDependents = await Dependent.find({
+      owner: userId,
+      active: true,
+      linkedAccountStatus: 'pending',
+      linkedAccountEmail: { $ne: '' },
+    });
+    for (const pending of pendingDependents) {
+      const linkedUser = await User.findOne({ email: pending.linkedAccountEmail }).select('_id');
+      if (linkedUser) {
+        pending.linkedUser = linkedUser._id;
+        pending.linkedAccountStatus = 'linked';
+        pending.careAccessMode = 'linked_wallet';
+        await pending.save();
+      }
+    }
+
     const dependents = await Dependent.find({ owner: userId, active: true })
       .sort({ createdAt: -1 })
       .populate('linkedUser', 'fullName email');
@@ -1308,11 +1320,18 @@ router.post('/pay-approved-service', async (req, res) => {
       (coverage) => coverage.serviceType === normalizedServiceType || coverage.serviceType === normalizedCategory
     ) || null;
 
+    const coverageUsed = Number(
+      activeSubscription?.coverageUsed?.[normalizedServiceType]?.used || 0
+    );
+    const coverageRemaining = Math.max(
+      0,
+      Number(insuranceCoverageEntry?.limit || 0) - coverageUsed
+    );
     const insuranceCoveredAmount = insuranceCoverageEntry
       ? Math.min(
           totalAmount,
           Math.round((totalAmount * Number(insuranceCoverageEntry.coveragePercentage || 0)) * 100) / 100,
-          Number(insuranceCoverageEntry.limit || totalAmount)
+          coverageRemaining
         )
       : 0;
 
@@ -1419,6 +1438,20 @@ router.post('/pay-approved-service', async (req, res) => {
         appliedDependentSupportAllocation.updatedAt = new Date();
       }
 
+      // Coverage is a limited benefit, not merely a display estimate. Record
+      // the covered amount in the same transaction as the provider payment.
+      if (activeSubscription && normalizedSplit.insuranceCoverage > 0) {
+        const usage = activeSubscription.coverageUsed || {};
+        usage[normalizedServiceType] = {
+          used: coverageUsed + normalizedSplit.insuranceCoverage,
+          limit: Number(insuranceCoverageEntry.limit || 0),
+        };
+        activeSubscription.coverageUsed = usage;
+        activeSubscription.markModified('coverageUsed');
+        activeSubscription.updatedAt = new Date();
+        await activeSubscription.save({ session });
+      }
+
       await wallet.save({ session });
 
       const providerWallet = await ensureWallet(providerId, session);
@@ -1469,6 +1502,7 @@ router.post('/pay-approved-service', async (req, res) => {
         newBalance,
         splitAllocation: normalizedSplit,
         insuranceApplied: normalizedSplit.insuranceCoverage > 0,
+        insuranceCoverageRemaining: Math.max(0, coverageRemaining - normalizedSplit.insuranceCoverage),
         transactionId: transaction._id,
       });
     } catch (error) {
