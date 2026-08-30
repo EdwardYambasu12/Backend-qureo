@@ -232,6 +232,7 @@ router.post('/', async (req, res) => {
     }
 
     const { messages } = req.body;
+    console.log("message", messages)
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ message: "Missing or invalid 'messages' array in request body.", options: [] });
     }

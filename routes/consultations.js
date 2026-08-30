@@ -277,6 +277,8 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
         clinicDetails = {},
       } = req.body;
 
+      console.log(req.body, "consultation")
+
       const resolvedDurationMinutes = resolveDurationMinutes(duration, durationMinutes);
       const roomId = `room-${uuidv4()}`;
       const isInPerson = mode === "in-person" || consultationType === "in-person";
@@ -416,6 +418,139 @@ router.get("/patient/:patientId", auth, async (req, res) => {
     res.status(500).json({ message: "Failed to fetch consultations", error: err.message });
   }
 });
+
+// Get all chat sessions for a user (patient or doctor)
+router.get('/chat-sessions', auth, async (req, res) => {
+  try {
+    const userId = req.query.userId || req.query.patientId || req.query.doctorId || req.userId;
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    const consultations = await Consultation.find({
+      $or: [
+        { patient: userId },
+        { doctor: userId },
+      ],
+      mode: 'chat',
+    }).sort({ updatedAt: -1 }).lean();
+
+    const normalized = consultations.map((consultation) => ({
+      ...consultation,
+      lastMessage: Array.isArray(consultation.chat) && consultation.chat.length > 0
+        ? consultation.chat[consultation.chat.length - 1]
+        : null,
+    }));
+
+    return res.json({ consultations: normalized });
+  } catch (err) {
+    return res.status(500).json({ message: 'Failed to fetch consultation chats', error: err.message });
+  }
+});
+
+router.get('/:id/chat', auth, async (req, res) => {
+  try {
+    const consultation = await Consultation.findById(req.params.id).lean();
+    if (!consultation) {
+      return res.status(404).json({ message: 'Consultation not found' });
+    }
+
+    const participantIds = [String(consultation.patient), String(consultation.doctor)];
+    const authUserId = req.userId ? String(req.userId) : '';
+    const isParticipant = authUserId && participantIds.includes(authUserId);
+
+    if (!isParticipant && (!req.query.userId || !participantIds.includes(String(req.query.userId)))) {
+      return res.status(403).json({ message: 'You are not allowed to access this consultation chat.' });
+    }
+
+    const chat = Array.isArray(consultation.chat)
+      ? consultation.chat
+          .slice()
+          .sort((a, b) => new Date(a.sentAt || 0) - new Date(b.sentAt || 0))
+          .map((message) => ({
+            ...message,
+            attachments: Array.isArray(message.attachments) ? message.attachments : [],
+            text: typeof message.text === 'string' ? message.text : '',
+          }))
+      : [];
+
+    return res.json({ chat });
+  } catch (err) {
+    return res.status(500).json({ message: 'Failed to fetch chat messages', error: err.message });
+  }
+});
+
+router.post('/:id/chat', auth, async (req, res) => {
+  try {
+    const { text = '', senderName = '', attachments = [] } = req.body || {};
+    const consultation = await Consultation.findById(req.params.id).lean();
+
+    if (!consultation) {
+      return res.status(404).json({ message: 'Consultation not found' });
+    }
+    console.log("consultation details", consultation)
+    const authUserId = req.userId ? String(req.userId) : '';
+    const patientId = consultation.patient ? String(consultation.patient) : '';
+    const doctorId = consultation.doctor ? String(consultation.doctor) : '';
+    const allowedParticipantIds = [patientId, doctorId].filter(Boolean);
+    const userIsParticipant = authUserId && allowedParticipantIds.includes(authUserId);
+
+    console.log('[CHAT DEBUG]', {
+      authUserId,
+      patientId,
+      doctorId,
+      allowedParticipantIds,
+      userIsParticipant,
+      consultationId: consultation._id,
+      consultationPatientType: typeof consultation.patient,
+      consultationDoctorType: typeof consultation.doctor,
+    });
+
+    if (!userIsParticipant) {
+      return res.status(403).json({ 
+        message: 'You are not allowed to send messages in this consultation chat.',
+        debug: { authUserId, patientId, doctorId, allowedParticipantIds, consultationId: String(consultation._id) }
+      });
+    }
+
+    const normalizedText = typeof text === 'string' ? text.trim() : '';
+    const normalizedAttachments = Array.isArray(attachments)
+      ? attachments
+          .filter((file) => file && typeof file.url === 'string' && file.url.trim())
+          .slice(0, 5)
+          .map((file) => ({
+            name: typeof file.name === 'string' ? file.name : 'Shared file',
+            url: file.url,
+            mimeType: typeof file.mimeType === 'string' ? file.mimeType : '',
+            size: Number(file.size) || 0,
+            type: typeof file.type === 'string' ? file.type : 'file',
+          }))
+      : [];
+
+    if (!normalizedText && normalizedAttachments.length === 0) {
+      return res.status(400).json({ message: 'Message or file attachment is required' });
+    }
+
+    const resolvedSenderRole = authUserId === patientId ? 'patient' : 'doctor';
+
+    const message = {
+      text: normalizedText,
+      attachments: normalizedAttachments,
+      senderId: authUserId,
+      senderName: typeof senderName === 'string' && senderName.trim() ? senderName.trim() : resolvedSenderRole === 'patient' ? 'Patient' : 'Doctor',
+      senderRole: resolvedSenderRole,
+      sentAt: new Date(),
+    };
+
+    await Consultation.findByIdAndUpdate(req.params.id, { $push: { chat: message }, updatedAt: new Date() });
+
+    return res.status(201).json({ message });
+  } catch (err) {
+    console.error('[CHAT ERROR]', err);
+    return res.status(500).json({ message: 'Failed to send chat message', error: err.message });
+  }
+});
+
 
 // Cancel consultation
 router.put("/:id/cancel", auth, async (req, res) => {
