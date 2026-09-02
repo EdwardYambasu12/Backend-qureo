@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Medicine = require('../models/Medicine');
+const Comment = require('../models/Comment');
 
 
 
@@ -95,12 +96,11 @@ router.get('/search/:query', async (req, res) => {
 
 router.patch('/:id/review', async (req, res) => {
   try {
-    const { newRating } = req.body; // e.g. 5, 4, 3
+    const { newRating } = req.body;
 
     const medicine = await Medicine.findById(req.params.id);
     if (!medicine) return res.status(404).json({ message: 'Medicine not found' });
 
-    // compute new average
     const totalReviews = medicine.reviews + 1;
     const newAverage = ((medicine.rating * medicine.reviews) + newRating) / totalReviews;
 
@@ -111,6 +111,48 @@ router.patch('/:id/review', async (req, res) => {
     res.json({ message: 'Review added', medicine });
   } catch (err) {
     res.status(500).json({ message: 'Failed to update rating', error: err.message });
+  }
+});
+
+router.post('/:id/comments', async (req, res) => {
+  try {
+    const { userId, userName, text, rating } = req.body;
+
+    const medicine = await Medicine.findById(req.params.id);
+    if (!medicine) return res.status(404).json({ message: 'Medicine not found' });
+
+    const comment = new Comment({
+      medicine: req.params.id,
+      userId,
+      userName,
+      text,
+      rating,
+    });
+    await comment.save();
+
+    if (rating) {
+      const totalReviews = medicine.reviews + 1;
+      const newAverage = ((medicine.rating * medicine.reviews) + rating) / totalReviews;
+      medicine.rating = parseFloat(newAverage.toFixed(1));
+      medicine.reviews = totalReviews;
+      await medicine.save();
+    }
+
+    res.status(201).json({ message: 'Comment added', comment });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to add comment', error: err.message });
+  }
+});
+
+router.get('/:id/comments', async (req, res) => {
+  try {
+    const comments = await Comment.find({ medicine: req.params.id })
+      .sort({ createdAt: -1 });
+    res.json({ comments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch comments', error: err.message });
   }
 });
 

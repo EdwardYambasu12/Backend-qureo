@@ -69,51 +69,76 @@ router.get('/latest', auth, async (req, res) => {
   }
 });
 
-// POST new vitals (append to arrays)
+// POST new vitals (append to arrays on the latest user vitals record)
 router.post('/', auth, async (req, res) => {
-  console.log("called")
   try {
     const userId = req.userId;
     const { bloodPressure, heartRate, temperature, oxygenLevel, bloodSugar, weight, symptoms, adherenceEvents, hydration, notes, source, deviceName } = req.body;
-    console.log(bloodPressure, "blood pressure")
-    // Build new entries
+
     let bpEntry;
     if (typeof bloodPressure === 'string') {
       const [systolic, diastolic] = bloodPressure.split('/').map(Number);
       bpEntry = { systolic, diastolic, raw: bloodPressure, measuredAt: new Date() };
-    } else if (typeof bloodPressure === 'object') {
+    } else if (typeof bloodPressure === 'object' && bloodPressure !== null) {
       bpEntry = { ...bloodPressure, measuredAt: new Date() };
     }
 
-    const hrEntry = heartRate ? { value: heartRate, measuredAt: new Date() } : null;
-    const tempEntry = temperature ? { value: temperature, measuredAt: new Date() } : null;
-    const o2Entry = oxygenLevel ? { value: oxygenLevel, measuredAt: new Date() } : null;
+    const hrEntry = heartRate !== undefined && heartRate !== null && heartRate !== '' ? { value: Number(heartRate), measuredAt: new Date() } : null;
+    const tempEntry = temperature !== undefined && temperature !== null && temperature !== '' ? { value: Number(temperature), measuredAt: new Date() } : null;
+    const o2Entry = oxygenLevel !== undefined && oxygenLevel !== null && oxygenLevel !== '' ? { value: Number(oxygenLevel), measuredAt: new Date() } : null;
     const sugarEntry = normalizeBloodSugar(bloodSugar);
-    const weightEntry = weight ? { value: weight, measuredAt: new Date() } : null;
-    const hydrationEntry = hydration ? { value: hydration, measuredAt: new Date() } : null;
+    const weightEntry = weight !== undefined && weight !== null && weight !== '' ? { value: Number(weight), measuredAt: new Date() } : null;
+    const hydrationEntry = hydration !== undefined && hydration !== null && hydration !== '' ? { value: Number(hydration), measuredAt: new Date() } : null;
 
-    const vitals = new Vitals({
-      user: userId,
-      bloodPressure: bpEntry ? [bpEntry] : [],
-      heartRate: hrEntry ? [hrEntry] : [],
-      temperature: tempEntry ? [tempEntry] : [],
-      oxygenLevel: o2Entry ? [o2Entry] : [],
-      bloodSugar: sugarEntry ? [sugarEntry] : [],
-      weight: weightEntry ? [weightEntry] : [],
-      hydration: hydrationEntry ? [hydrationEntry] : [],
-      symptoms: symptoms || [],
-      adherenceEvents: normalizeAdherenceEvents(adherenceEvents),
-      notes,
-      source: source || 'manual',
-      deviceName,
-    });
+    let vitals = await Vitals.findOne({ user: userId }).sort({ createdAt: -1 });
+
+    if (!vitals) {
+      vitals = new Vitals({
+        user: userId,
+        bloodPressure: bpEntry ? [bpEntry] : [],
+        heartRate: hrEntry ? [hrEntry] : [],
+        temperature: tempEntry ? [tempEntry] : [],
+        oxygenLevel: o2Entry ? [o2Entry] : [],
+        bloodSugar: sugarEntry ? [sugarEntry] : [],
+        weight: weightEntry ? [weightEntry] : [],
+        hydration: hydrationEntry ? [hydrationEntry] : [],
+        symptoms: Array.isArray(symptoms) ? symptoms : (symptoms ? [symptoms] : []),
+        adherenceEvents: normalizeAdherenceEvents(adherenceEvents),
+        notes: Array.isArray(notes) ? notes : (notes ? [notes] : []),
+        source: source || 'manual',
+        deviceName,
+      });
+    } else {
+      if (bpEntry) vitals.bloodPressure.push(bpEntry);
+      if (hrEntry) vitals.heartRate.push(hrEntry);
+      if (tempEntry) vitals.temperature.push(tempEntry);
+      if (o2Entry) vitals.oxygenLevel.push(o2Entry);
+      if (sugarEntry) vitals.bloodSugar.push(sugarEntry);
+      if (weightEntry) vitals.weight.push(weightEntry);
+      if (hydrationEntry) vitals.hydration.push(hydrationEntry);
+
+      if (symptoms) {
+        vitals.symptoms.push(...(Array.isArray(symptoms) ? symptoms : [symptoms]));
+      }
+
+      if (adherenceEvents) {
+        vitals.adherenceEvents.push(...normalizeAdherenceEvents(adherenceEvents));
+      }
+
+      if (notes) {
+        vitals.notes.push(...(Array.isArray(notes) ? notes : [notes]));
+      }
+
+      if (source) vitals.source = source;
+      if (deviceName) vitals.deviceName = deviceName;
+    }
 
     await vitals.save();
 
     res.status(201).json({ message: 'Vitals recorded successfully', vitals });
   } catch (err) {
+    console.error('Error saving vitals:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
-    console.log(err.message)
   }
 });
 
