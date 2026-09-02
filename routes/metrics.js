@@ -7,6 +7,17 @@ const HealthAssessment = require('../models/HealthAssessment');
 const Consultation = require('../models/Consultations');
 const auth = require('../middleware/auth');
 
+const lastArrayValue = (arr) => Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : undefined;
+const lastNumericValue = (arr) => {
+  const last = lastArrayValue(arr);
+  if (!last) return null;
+  if (typeof last === 'number') return last;
+  if (typeof last === 'object' && last !== null) {
+    if (typeof last.value === 'number') return last.value;
+  }
+  return null;
+};
+
 const buildNotExpiredFilter = (now = new Date()) => ({
   $or: [
     { endDate: { $exists: false } },
@@ -265,20 +276,22 @@ router.get('/dashboard', auth, async (req, res) => {
 
     res.json({
       success: true,
-      metrics: {
+       metrics: {
         vitals: {
           latest: latestVitals ? {
             time: latestVitals.createdAt,
             bloodPressure: latestVitals.bloodPressure?.raw || (latestVitals.bloodPressure?.systolic && latestVitals.bloodPressure?.diastolic ? `${latestVitals.bloodPressure.systolic}/${latestVitals.bloodPressure.diastolic}` : null),
-            heartRate: latestVitals.heartRate,
-            temperature: latestVitals.temperature,
-            oxygenLevel: latestVitals.oxygenLevel,
-            bloodSugar: hasNumericValue(latestVitals.bloodSugar?.value) ? {
-              value: latestVitals.bloodSugar.value,
-              unit: latestVitals.bloodSugar.unit,
-              readingType: latestVitals.bloodSugar.readingType,
-            } : null,
-            weight: latestVitals.weight,
+            heartRate: lastNumericValue(latestVitals.heartRate),
+            temperature: lastNumericValue(latestVitals.temperature),
+            oxygenLevel: lastNumericValue(latestVitals.oxygenLevel),
+            bloodSugar: (() => {
+              const lastSugar = lastArrayValue(latestVitals.bloodSugar);
+              if (!lastSugar) return null;
+              if (typeof lastSugar === 'number') return { value: lastSugar, unit: 'mg/dL', readingType: 'other' };
+              if (typeof lastSugar === 'object' && lastSugar.value != null) return lastSugar;
+              return null;
+            })(),
+            weight: lastNumericValue(latestVitals.weight),
           } : null,
           today: vitalStats.today,
         },
@@ -671,11 +684,11 @@ router.get('/summary', auth, async (req, res) => {
         lastUpdated: latestVitals?.createdAt || null,
         vitals: latestVitals ? {
           bloodPressure: latestVitals.bloodPressure?.raw || (latestVitals.bloodPressure?.systolic && latestVitals.bloodPressure?.diastolic ? `${latestVitals.bloodPressure.systolic}/${latestVitals.bloodPressure.diastolic}` : null),
-          heartRate: latestVitals.heartRate,
+          heartRate: lastNumericValue(latestVitals.heartRate),
           heartRateTrend: hrTrend,
-          temperature: latestVitals.temperature,
-          oxygenLevel: latestVitals.oxygenLevel,
-          weight: latestVitals.weight,
+          temperature: lastNumericValue(latestVitals.temperature),
+          oxygenLevel: lastNumericValue(latestVitals.oxygenLevel),
+          weight: lastNumericValue(latestVitals.weight),
         } : null,
         latestAssessment: latestAssessment ? {
           score: latestAssessment.score,

@@ -1167,6 +1167,95 @@ router.post('/dependents/:id/allowance', async (req, res) => {
         throw new Error('Insufficient wallet balance to create this allowance');
       }
 
+      if (dependent.linkedUser && dependent.careAccessMode === 'linked_wallet') {
+        const allocatedAmount = (wallet.dependentSupportAllocations || [])
+          .filter((allocation) => allocation.active)
+          .reduce((sum, allocation) => sum + Number(allocation.availableAmount || 0), 0);
+        const availableBalance = Number(wallet.balance || 0) - allocatedAmount;
+
+        if (availableBalance < allowanceAmount) {
+          throw new Error('Insufficient available wallet balance after existing dependent allowances');
+        }
+
+        const dependentWallet = await ensureWallet(dependent.linkedUser, session);
+        const ownerPreviousBalance = Number(wallet.balance || 0);
+        const dependentPreviousBalance = Number(dependentWallet.balance || 0);
+
+        wallet.balance = ownerPreviousBalance - allowanceAmount;
+        wallet.totalWithdrawals = Number(wallet.totalWithdrawals || 0) + allowanceAmount;
+        wallet.lastTransaction = new Date();
+        dependentWallet.balance = dependentPreviousBalance + allowanceAmount;
+        dependentWallet.totalDeposits = Number(dependentWallet.totalDeposits || 0) + allowanceAmount;
+        dependentWallet.lastTransaction = new Date();
+
+        await wallet.save({ session });
+        await dependentWallet.save({ session });
+
+        const reference = `DEP-TRANSFER-${Date.now()}`;
+        const ownerTransaction = new Transaction({
+          wallet: wallet._id,
+          user: userId,
+          dependentId: dependent._id,
+          type: 'dependent_wallet_transfer',
+          amount: allowanceAmount,
+          previousBalance: ownerPreviousBalance,
+          newBalance: wallet.balance,
+          status: 'completed',
+          paymentMethod: 'wallet',
+          fundingSource: 'walletBalance',
+          description: `Transferred funds to ${dependent.fullName}`,
+          reference,
+          metadata: { dependentId: dependent._id, recipientUserId: dependent.linkedUser, reference: String(reference || '').trim() },
+          completedAt: new Date(),
+        });
+        await ownerTransaction.save({ session });
+
+        const recipientTransaction = new Transaction({
+          wallet: dependentWallet._id,
+          user: dependent.linkedUser,
+          dependentId: dependent._id,
+          type: 'dependent_wallet_transfer_received',
+          amount: allowanceAmount,
+          previousBalance: dependentPreviousBalance,
+          newBalance: dependentWallet.balance,
+          status: 'completed',
+          paymentMethod: 'wallet',
+          fundingSource: 'walletBalance',
+          description: `Received funds from ${ownerTransaction.user}`,
+          reference: `${reference}-RECEIVED`,
+          metadata: { dependentId: dependent._id, senderUserId: userId, reference },
+          completedAt: new Date(),
+        });
+        await recipientTransaction.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        try {
+          await notifyUser({
+            userId: dependent.linkedUser,
+            type: 'wallet_funded',
+            title: 'Wallet funded by your sponsor',
+            body: `${ownerTransaction.amount.toFixed(2)} was added to your health wallet.`,
+            route: '/health-wallet',
+            data: { transactionId: String(recipientTransaction._id), amount: String(allowanceAmount) },
+          });
+        } catch (notifyError) {
+          console.warn('[wallet] push failed after dependent transfer:', notifyError?.message || notifyError);
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: 'Funds transferred to dependent wallet',
+          transfer: {
+            amount: allowanceAmount,
+            ownerBalance: wallet.balance,
+            dependentBalance: dependentWallet.balance,
+            transactionId: recipientTransaction._id,
+          },
+        });
+      }
+
       const reserved = reserveSponsorAllowanceFunds(wallet, allowanceAmount);
       if (!reserved) {
         throw new Error('Only personal care-wallet funds can be converted into a dependent allowance');
