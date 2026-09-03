@@ -60,7 +60,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const test = await LabTest.findById(id);
+    const test = await LabTest.findById(id).populate("reviews.user", "fullName name");
     if (!test) {
       return res.status(404).json({ error: "Lab test not found" });
     }
@@ -68,6 +68,39 @@ router.get("/:id", async (req, res) => {
   } catch (err) {
     console.error("LabTest fetch error:", err);
     res.status(500).json({ error: "Failed to fetch lab test", details: err.message });
+  }
+});
+
+// POST a review/comment for a lab test
+router.post("/:id/reviews", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, userName, comment, rating } = req.body;
+
+    const test = await LabTest.findById(id);
+    if (!test) {
+      return res.status(404).json({ error: "Lab test not found" });
+    }
+
+    const review = {
+      user: userId || null,
+      userName: userName || "Anonymous",
+      comment: comment || "",
+      rating: rating || 0,
+      date: new Date(),
+    };
+
+    test.reviews.push(review);
+
+    const totalRating = test.reviews.reduce((sum, r) => sum + (r.rating || 0), 0);
+    test.ratings = test.reviews.length > 0 ? totalRating / test.reviews.length : 0;
+
+    await test.save();
+    const updatedTest = await LabTest.findById(id).populate("reviews.user", "fullName name");
+    res.status(201).json({ success: true, test: updatedTest, review });
+  } catch (err) {
+    console.error("LabTest review error:", err);
+    res.status(500).json({ error: "Failed to add review", details: err.message });
   }
 });
 
