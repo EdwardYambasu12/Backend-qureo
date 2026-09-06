@@ -90,13 +90,24 @@ async function notifyUser({
     genericBody,
   });
 
-  return sendPushToToken(tokenDoc.token, content.title, content.body, {
-    ...data,
-    type,
-    category,
-    privacyMode,
-    route: data.route || route,
-  });
+  try {
+    const result = await sendPushToToken(tokenDoc.token, content.title, content.body, {
+      ...data,
+      type,
+      category,
+      privacyMode,
+      route: data.route || route,
+    });
+
+    if (!result.success && /registration token|not registered|invalid/i.test(result.reason || '')) {
+      await NotificationToken.deleteOne({ _id: tokenDoc._id });
+    }
+
+    return result;
+  } catch (error) {
+    console.error(`[NotifyUser] Failed for user ${userId}:`, error);
+    return { success: false, reason: error?.message || 'Notification delivery failed' };
+  }
 }
 
 module.exports = {

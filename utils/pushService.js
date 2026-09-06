@@ -27,6 +27,7 @@ try {
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY_PATH;
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+const serviceAccountSecret = process.env.FIREBASE_SERVICE_ACCOUNT;
 const firebaseProjectIdEnv = process.env.FIREBASE_PROJECT_ID;
 const firebaseClientEmailEnv = process.env.FIREBASE_CLIENT_EMAIL;
 const firebasePrivateKeyEnv = process.env.FIREBASE_PRIVATE_KEY;
@@ -73,6 +74,20 @@ function parseServiceAccountFromEnv() {
     }
   }
 
+  if (serviceAccountSecret) {
+    try {
+      const parsed = JSON.parse(serviceAccountSecret);
+      const normalized = normalizeServiceAccount(parsed);
+      if (!normalized) {
+        pushInitStatus.reason = 'FIREBASE_SERVICE_ACCOUNT missing project/client/private key fields';
+      } else {
+        return { source: 'env_secret', serviceAccount: normalized };
+      }
+    } catch (error) {
+      pushInitStatus.reason = 'Invalid FIREBASE_SERVICE_ACCOUNT';
+    }
+  }
+
   if (serviceAccountJson) {
     try {
       const parsed = JSON.parse(serviceAccountJson);
@@ -105,6 +120,16 @@ function parseServiceAccountFromEnv() {
   }
 
   if (serviceAccountPath) {
+    try {
+      const parsed = JSON.parse(serviceAccountPath);
+      const normalized = normalizeServiceAccount(parsed);
+      if (normalized) {
+        return { source: 'key_path_env_json', serviceAccount: normalized };
+      }
+    } catch {
+      // This value is a filesystem path, handled below.
+    }
+
     const resolvedServiceAccountPath = path.resolve(serviceAccountPath);
     if (!fs.existsSync(resolvedServiceAccountPath)) {
       console.warn(`[Push Service] Service account file not found at: ${resolvedServiceAccountPath}. Push notifications are disabled.`);
@@ -157,7 +182,7 @@ try {
     if (!pushInitStatus.reason) {
       pushInitStatus.reason = 'No Firebase service account configured';
     }
-    console.warn('[Push Service] Firebase service account not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_SERVICE_ACCOUNT_BASE64, or FIREBASE_SERVICE_ACCOUNT_KEY_PATH.');
+    console.warn('[Push Service] Firebase service account not configured. Set FIREBASE_SERVICE_ACCOUNT, FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_SERVICE_ACCOUNT_BASE64, or FIREBASE_SERVICE_ACCOUNT_KEY_PATH.');
   } else {
     if (!initializeApp || !cert || !getMessaging) {
       pushInitStatus.reason = 'Firebase SDK loader unavailable';
@@ -193,7 +218,7 @@ async function sendPushToToken(token, title, body, data = {}) {
   if (!firebaseApp) {
     return {
       success: false,
-      reason: 'Firebase Admin not initialized — check FIREBASE_SERVICE_ACCOUNT_KEY_PATH',
+      reason: `Firebase Admin not initialized: ${pushInitStatus.reason || 'check Railway Firebase service account variables'}`,
     };
   }
 

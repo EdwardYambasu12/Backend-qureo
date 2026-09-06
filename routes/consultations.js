@@ -4,13 +4,11 @@ const Consultation = require("../models/Consultations");
 const Doctor = require("../models/Doctor");
 const Profile = require("../models/Profile");
 const Prescription = require("../models/Prescription");
-const NotificationToken = require("../models/NotificationToken");
 const auth = require("../middleware/auth");
 const doctorAuth = require('../middleware/doctorAuth');
 const moment = require("moment-timezone");
 const sendEmail = require("../utils/email");
 const sendSMS = require("../utils/sms");
-const { sendPushToToken } = require("../utils/pushService");
 const { notifyUser } = require("../utils/notifyUser");
 
 const STATUS_ACTIVE_FOR_CONFLICT = ["scheduled", "ongoing", "pending", "confirmed"];
@@ -42,25 +40,18 @@ const isSlotAvailableFromDoctorSchedule = (doctor, appointmentTime) => {
   return ranges.some((range) => isWithinRange(appointmentTime, range));
 };
 
-const getNotificationTokenByOwnerId = async (ownerId) => {
-  if (!ownerId) return null;
-  try {
-    return await NotificationToken.findOne({ userId: ownerId }).lean();
-  } catch (err) {
-    return null;
-  }
-};
-
 const notifyViaAllChannels = async ({ ownerId, email, phone, subject, text, pushTitle, pushBody, pushData = {} }) => {
   await Promise.allSettled([
     sendEmail(email, subject, text),
     sendSMS(phone, text),
     sendSMS.sendWhatsApp ? sendSMS.sendWhatsApp(phone, text) : Promise.resolve(false),
-    (async () => {
-      const tokenDoc = await getNotificationTokenByOwnerId(ownerId);
-      if (!tokenDoc?.token) return { skipped: true };
-      return sendPushToToken(tokenDoc.token, pushTitle, pushBody, pushData);
-    })(),
+    notifyUser({
+      userId: ownerId,
+      type: pushData.type,
+      title: pushTitle,
+      body: pushBody,
+      data: pushData,
+    }),
   ]);
 };
 
@@ -463,6 +454,9 @@ router.get('/:id/chat', auth, async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to access this consultation chat.' });
     }
 
+    const chatExpiresAt = new Date(new Date(consultation.appointmentTime).getTime() + 48 * 60 * 60 * 1000);
+    const chatExpired = new Date() > chatExpiresAt;
+
     const chat = Array.isArray(consultation.chat)
       ? consultation.chat
           .slice()
@@ -474,7 +468,7 @@ router.get('/:id/chat', auth, async (req, res) => {
           }))
       : [];
 
-    return res.json({ chat });
+    return res.json({ chat, chatExpiresAt, chatExpired });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to fetch chat messages', error: err.message });
   }
@@ -488,6 +482,12 @@ router.post('/:id/chat', auth, async (req, res) => {
     if (!consultation) {
       return res.status(404).json({ message: 'Consultation not found' });
     }
+
+    const chatExpiresAt = new Date(new Date(consultation.appointmentTime).getTime() + 48 * 60 * 60 * 1000);
+    if (new Date() > chatExpiresAt) {
+      return res.status(403).json({ message: 'Chat session has expired. You can only view messages now.', chatExpired: true });
+    }
+
     console.log("consultation details", consultation)
     const authUserId = req.userId ? String(req.userId) : '';
     const patientId = consultation.patient ? String(consultation.patient) : '';
