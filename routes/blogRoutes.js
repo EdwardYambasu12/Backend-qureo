@@ -171,4 +171,17 @@ router.get("/:id/comments", async (req, res) => {
   }
 });
 
+// 🔖 Get saved blogs for a user
+router.get("/saved/user", async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    if (!userId) return res.status(400).json({ message: "userId is required" });
+
+    const blogs = await Blog.find({ saves: userId }).sort({ createdAt: -1 });
+    res.json({ blogs });
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching saved blogs", error: error.message });
+  }
+});
+
 module.exports = router;
