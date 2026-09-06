@@ -1,5 +1,14 @@
 const mongoose = require("mongoose");
 
+const commentSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true },
+    userName: { type: String, default: "Anonymous" },
+    text: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
 const blogSchema = new mongoose.Schema(
   {
     title: {
@@ -44,6 +53,10 @@ const blogSchema = new mongoose.Schema(
       required: true,
     },
     tags: [String],
+    likes: [{ type: String }],
+    shares: { type: Number, default: 0 },
+    saves: [{ type: String }],
+    comments: [commentSchema],
   },
   { timestamps: true }
 );

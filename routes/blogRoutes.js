@@ -88,5 +88,87 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ❤️ Toggle like
+router.post("/:id/like", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    const userId = req.body.userId;
+    if (!userId) return res.status(400).json({ message: "userId is required" });
+
+    const idx = blog.likes.indexOf(userId);
+    if (idx === -1) blog.likes.push(userId);
+    else blog.likes.splice(idx, 1);
+
+    await blog.save();
+    res.json({ liked: idx === -1, likes: blog.likes });
+  } catch (error) {
+    res.status(500).json({ message: "Error toggling like", error: error.message });
+  }
+});
+
+// 📤 Increment share count
+router.post("/:id/share", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    blog.shares = (blog.shares || 0) + 1;
+    await blog.save();
+    res.json({ shares: blog.shares });
+  } catch (error) {
+    res.status(500).json({ message: "Error sharing", error: error.message });
+  }
+});
+
+// 🔖 Toggle save
+router.post("/:id/save", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    const userId = req.body.userId;
+    if (!userId) return res.status(400).json({ message: "userId is required" });
+
+    const idx = blog.saves.indexOf(userId);
+    if (idx === -1) blog.saves.push(userId);
+    else blog.saves.splice(idx, 1);
+
+    await blog.save();
+    res.json({ saved: idx === -1, saves: blog.saves });
+  } catch (error) {
+    res.status(500).json({ message: "Error toggling save", error: error.message });
+  }
+});
+
+// 💬 Add comment
+router.post("/:id/comments", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    const { userId, userName, text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ message: "Comment text is required" });
+
+    blog.comments.push({
+      userId: userId || null,
+      userName: userName || "Anonymous",
+      text: text.trim(),
+    });
+
+    await blog.save();
+    res.status(201).json({ comment: blog.comments[blog.comments.length - 1], comments: blog.comments });
+  } catch (error) {
+    res.status(500).json({ message: "Error adding comment", error: error.message });
+  }
+});
+
+// 💬 Get comments
+router.get("/:id/comments", async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ message: "Blog not found" });
+    res.json({ comments: blog.comments });
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching comments", error: error.message });
+  }
+});
 
 module.exports = router;
