@@ -1,5 +1,6 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
+const mongoose = require("mongoose");
 const Consultation = require("../models/Consultations");
 const Doctor = require("../models/Doctor");
 const Profile = require("../models/Profile");
@@ -423,15 +424,22 @@ router.get("/patient/:patientId", auth, async (req, res) => {
 // Get all chat sessions for a user (patient or doctor)
 router.get('/chat-sessions', auth, async (req, res) => {
   try {
-    const userId = req.query.userId || req.query.patientId || req.query.doctorId || req.userId;
+    const requestedUserId = req.query.userId || req.query.patientId || req.query.doctorId;
+    const userId = req.userId || requestedUserId;
     if (!userId) {
       return res.status(400).json({ message: 'userId is required' });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: 'userId must be a valid MongoDB ObjectId' });
+    }
+
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+
     const consultations = await Consultation.find({
       $or: [
-        { patient: userId },
-        { doctor: userId },
+        { patient: objectUserId },
+        { doctor: objectUserId },
       ],
       mode: 'chat',
     }).sort({ updatedAt: -1 }).lean();
@@ -445,6 +453,11 @@ router.get('/chat-sessions', auth, async (req, res) => {
 
     return res.json({ consultations: normalized });
   } catch (err) {
+    console.error('[chat-sessions] Failed to fetch consultations:', {
+      message: err?.message,
+      name: err?.name,
+      userId: req.userId || req.query.userId || req.query.patientId || req.query.doctorId,
+    });
     return res.status(500).json({ message: 'Failed to fetch consultation chats', error: err.message });
   }
 });
