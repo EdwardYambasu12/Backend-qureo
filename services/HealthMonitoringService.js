@@ -5,6 +5,7 @@ const Profile = require('../models/Profile');
 const HealthAssessment = require('../models/HealthAssessment');
 const HealthAlert = require('../models/HealthAlert');
 const User = require('../models/User');
+const {notifyUser} = require("../utils/notifyUser")
 
 /**
  * HEALTH MONITORING ALGORITHM
@@ -513,12 +514,22 @@ Please provide:
    */
   static async sendNotification(userId, alert) {
     try {
-      // TODO: Implement actual notification service
-      // - Push notifications (Firebase Cloud Messaging)
-      // - Email notifications
-      // - SMS notifications
-      // - In-app notifications
 
+      await notifyUser({
+             userId,
+             type: alert.type,
+             title: alert.title,
+             body: alert.message,
+             data: {
+               ...alert.data,
+               alertId: alert._id?.toString?.() || undefined,
+             },
+             route,
+             balancedTitle: alert.title,
+             balancedBody: alert.message,
+             genericTitle: isEducationInsight ? 'You have a new health update in Qureo' : 'You have a new remote monitoring update',
+             genericBody: isEducationInsight ? 'Open Qureo to view your latest health insight.' : 'Open Qureo to view your next care plan step.',
+           });
       console.log(`📬 Notification sent to user ${userId}:`, alert.title);
 
       // Mark as sent

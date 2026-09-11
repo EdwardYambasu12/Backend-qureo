@@ -4,6 +4,8 @@ const dosageSchema = new mongoose.Schema({
   time: { type: String, required: true }, // "08:00 AM", "02:00 PM"
   taken: { type: Boolean, default: false },
   takenAt: { type: Date }, // When the dose was actually taken
+  skippedAt: { type: Date },
+  snoozedUntil: { type: Date },
   notes: { type: String },
 });
 

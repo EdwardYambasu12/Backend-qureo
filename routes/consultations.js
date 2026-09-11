@@ -250,16 +250,6 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
     res.json(result);
   });
 
-  router.get("/:id", async (req, res) => {
-    try {
-      const consultation = await Consultation.findById(req.params.id).lean();
-      if (!consultation) return res.status(404).json({ message: "Consultation not found" });
-      res.json(consultation);
-    } catch (err) {
-      res.status(500).json({ message: "Failed to fetch consultation", error: err.message });
-    }
-  });
-
   // Create a new consultation
   router.post("/", async (req, res) => {
     try {
@@ -459,6 +449,16 @@ router.get('/chat-sessions', auth, async (req, res) => {
       userId: req.userId || req.query.userId || req.query.patientId || req.query.doctorId,
     });
     return res.status(500).json({ message: 'Failed to fetch consultation chats', error: err.message });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const consultation = await Consultation.findById(req.params.id).lean();
+    if (!consultation) return res.status(404).json({ message: "Consultation not found" });
+    res.json(consultation);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch consultation", error: err.message });
   }
 });
 

@@ -99,7 +99,10 @@ async function notifyUser({
       route: data.route || route,
     });
 
-    if (!result.success && /registration token|not registered|invalid/i.test(result.reason || '')) {
+    if (
+      !result.success &&
+      /registration token|not registered|invalid|sender.?id mismatch/i.test(result.reason || '')
+    ) {
       await NotificationToken.deleteOne({ _id: tokenDoc._id });
     }
 

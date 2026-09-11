@@ -227,7 +227,7 @@ router.post('/:id/mark-dose', auth, async (req, res) => {
     const { dosageTime, notes } = req.body; // dosageTime = "08:00 AM"
     const now = new Date();
 
-    const medication = await UserMedication.findOne({
+    const medication = await UserMedication.findOne({ 
       _id: medicationId,
       user: userId,
       ...buildNotExpiredFilter(now),

@@ -70,7 +70,7 @@ router.get('/', auth, async (req, res) => {
     const medications = await Medication.find({
       user: userId,
       isActive: true,
-      remindMe: true,
+   
       ...buildNotExpiredFilter(now),
     });
 
@@ -79,8 +79,8 @@ router.get('/', auth, async (req, res) => {
     const currentTime = `${currentHour}:${currentMinute}`;
 
     medications.forEach(med => {
-      if (med.scheduledTimes && med.scheduledTimes.length > 0) {
-        med.scheduledTimes.forEach((dose, idx) => {
+      if (med.dosages && med.dosages.length > 0) {
+        med.dosages.forEach((dose, idx) => {
           const effectiveDate = getDoseEffectiveDate(dose, now);
           const effectiveTime = formatTime(effectiveDate);
           const isUpcoming = effectiveTime > currentTime || effectiveTime === currentTime;
@@ -92,17 +92,17 @@ router.get('/', auth, async (req, res) => {
               id: `med-${med._id}-${idx}`,
               medicationId: med._id,
               type: 'medication',
-              title: `Take ${med.name}`,
-              message: `${med.dosage} • ${med.frequency}`,
+              title: `Take ${med.medicineName}`,
+              message: `${med.strength || med.instructions || ''} • ${med.frequency || ''}`.trim(),
               time: effectiveTime,
               priority: 'medium',
               icon: '💊',
               metadata: {
-                medicationName: med.name,
-                dosage: med.dosage,
+                medicationName: med.medicineName,
+                dosage: med.strength,
                 frequency: med.frequency,
-                prescribedBy: med.prescribedBy,
-                reason: med.reason,
+                prescribedBy: med.doctorName,
+                reason: med.instructions,
                 timeIndex: idx,
                 scheduledTime: dose.time,
                 snoozedUntil: dose.snoozedUntil || null,
@@ -306,8 +306,8 @@ router.get('/upcoming', auth, async (req, res) => {
     });
 
     medications.forEach(med => {
-      if (med.scheduledTimes && med.scheduledTimes.length > 0) {
-        med.scheduledTimes.forEach((dose, idx) => {
+      if (med.dosages && med.dosages.length > 0) {
+        med.dosages.forEach((dose, idx) => {
           const doseDate = getDoseEffectiveDate(dose, now);
 
           // Check if dose is today and upcoming
@@ -315,12 +315,12 @@ router.get('/upcoming', auth, async (req, res) => {
             const alreadyTaken = isDoseTakenToday(dose, now);
             const skippedToday = isDoseSkippedToday(dose, now);
             if (!alreadyTaken && !skippedToday) {
-              upcomingReminders.push({
+                  upcomingReminders.push({
                 id: `med-${med._id}-${idx}`,
                 medicationId: med._id,
                 type: 'medication',
-                title: `Take ${med.name}`,
-                message: `${med.dosage} • Due at ${formatTime(doseDate)}`,
+                title: `Take ${med.medicineName}`,
+                message: `${med.strength || med.instructions || ''} • Due at ${formatTime(doseDate)}`.trim(),
                 dueTime: doseDate,
                 minutesUntilDue: Math.round((doseDate - now) / 60000),
                 timeIndex: idx,
@@ -380,13 +380,13 @@ router.get('/today', auth, async (req, res) => {
     });
 
     medications.forEach(med => {
-      if (med.scheduledTimes && med.scheduledTimes.length > 0) {
-        const takenToday = med.scheduledTimes.filter(dose => {
+      if (med.dosages && med.dosages.length > 0) {
+        const takenToday = med.dosages.filter(dose => {
           return isDoseTakenToday(dose, now);
         });
-        const skippedToday = med.scheduledTimes.filter(dose => isDoseSkippedToday(dose, now));
+        const skippedToday = med.dosages.filter(dose => isDoseSkippedToday(dose, now));
 
-        const scheduledCount = med.scheduledTimes.length;
+        const scheduledCount = med.dosages.length;
         const takenCount = takenToday.length;
         const skippedCount = skippedToday.length;
 
@@ -394,10 +394,10 @@ router.get('/today', auth, async (req, res) => {
           id: `med-${med._id}`,
           medicationId: med._id,
           type: 'medication',
-          name: med.name,
-          dosage: med.dosage,
+          name: med.medicineName,
+          dosage: med.strength,
           frequency: med.frequency,
-          scheduledTimes: med.scheduledTimes.map((dose) => ({
+          scheduledTimes: med.dosages.map((dose) => ({
             time: dose.time,
             taken: isDoseTakenToday(dose, now),
             takenAt: dose.takenAt || null,
@@ -410,8 +410,8 @@ router.get('/today', auth, async (req, res) => {
           scheduledCount,
           skippedCount,
           adherence: Math.round((takenCount / scheduledCount) * 100),
-          reason: med.reason,
-          prescribedBy: med.prescribedBy,
+          reason: med.instructions,
+          prescribedBy: med.doctorName,
         });
       }
     });
@@ -551,17 +551,17 @@ router.post('/mark-taken', auth, async (req, res) => {
       });
     }
 
-    if (!medication.scheduledTimes[timeIndex]) {
+    if (!medication.dosages[timeIndex]) {
       return res.status(400).json({
         success: false,
         message: 'Invalid time index',
       });
     }
 
-    medication.scheduledTimes[timeIndex].taken = true;
-    medication.scheduledTimes[timeIndex].takenAt = new Date();
-    medication.scheduledTimes[timeIndex].skippedAt = null;
-    medication.scheduledTimes[timeIndex].snoozedUntil = null;
+    medication.dosages[timeIndex].taken = true;
+    medication.dosages[timeIndex].takenAt = new Date();
+    medication.dosages[timeIndex].skippedAt = null;
+    medication.dosages[timeIndex].snoozedUntil = null;
     await medication.save();
 
     res.json({
@@ -605,17 +605,17 @@ router.post('/skip', auth, async (req, res) => {
       });
     }
 
-    if (!medication.scheduledTimes[timeIndex]) {
+    if (!medication.dosages[timeIndex]) {
       return res.status(400).json({
         success: false,
         message: 'Invalid time index',
       });
     }
 
-    medication.scheduledTimes[timeIndex].taken = false;
-    medication.scheduledTimes[timeIndex].takenAt = null;
-    medication.scheduledTimes[timeIndex].skippedAt = new Date();
-    medication.scheduledTimes[timeIndex].snoozedUntil = null;
+    medication.dosages[timeIndex].taken = false;
+    medication.dosages[timeIndex].takenAt = null;
+    medication.dosages[timeIndex].skippedAt = new Date();
+    medication.dosages[timeIndex].snoozedUntil = null;
     await medication.save();
 
     res.json({
@@ -669,15 +669,15 @@ router.post('/snooze', auth, async (req, res) => {
       });
     }
 
-    if (!medication.scheduledTimes[timeIndex]) {
+    if (!medication.dosages[timeIndex]) {
       return res.status(400).json({
         success: false,
         message: 'Invalid time index',
       });
     }
 
-    medication.scheduledTimes[timeIndex].skippedAt = null;
-    medication.scheduledTimes[timeIndex].snoozedUntil = snoozedUntil;
+    medication.dosages[timeIndex].skippedAt = null;
+    medication.dosages[timeIndex].snoozedUntil = snoozedUntil;
     await medication.save();
 
     res.json({
@@ -765,8 +765,8 @@ router.get('/statistics', auth, async (req, res) => {
     let totalMissed = 0;
 
     medications.forEach(med => {
-      if (med.scheduledTimes && med.scheduledTimes.length > 0) {
-        med.scheduledTimes.forEach(dose => {
+      if (med.dosages && med.dosages.length > 0) {
+        med.dosages.forEach(dose => {
           totalScheduled++;
           if (isDoseTakenToday(dose, now)) {
             totalTaken++;

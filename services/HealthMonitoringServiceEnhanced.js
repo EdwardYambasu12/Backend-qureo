@@ -32,11 +32,11 @@ class HealthMonitoringService {
    */
   static async runHealthCheckup(batchSize = 50) {
     try {
-      console.log('🏥 Starting Enhanced Health Monitoring Algorithm...');
+      console.log(' Starting Enhanced Health Monitoring Algorithm...');
       const startTime = Date.now();
 
       const totalUsers = await User.countDocuments({ isActive: true });
-      console.log(`📊 Total active users to process: ${totalUsers}`);
+      console.log(`Total active users to process: ${totalUsers}`);
 
       let processedCount = 0;
       let alertsCreated = 0;
@@ -51,7 +51,7 @@ class HealthMonitoringService {
             .limit(batchSize)
             .lean();  // Use lean() for better performance
 
-          console.log(`📦 Processing batch: ${skip}-${skip + batchSize}`);
+          console.log(` Processing batch: ${skip}-${skip + batchSize}`);
 
           // Process batch in parallel (but with concurrency limit)
           const batchResults = await Promise.allSettled(

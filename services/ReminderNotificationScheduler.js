@@ -1,4 +1,4 @@
-const Medication = require('../models/Medication');
+const Medication = require('../models/UserMedication');
 const HealthGoal = require('../models/HealthGoal');
 const Profile = require('../models/Profile');
 const User = require('../models/User');
