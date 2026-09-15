@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, default: null },
   authProvider: { type: String, default: 'password' },
   refreshToken: { type: String },
+  passwordResetTokenHash: { type: String, default: null },
+  passwordResetExpiresAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // Indexes

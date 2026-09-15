@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
@@ -37,6 +39,37 @@ function issueToken(user) {
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
+}
+
+async function sendPasswordResetEmail({ email, resetUrl }) {
+  const {
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USER,
+    SMTP_PASS,
+    MAIL_FROM,
+  } = process.env;
+
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    console.warn(`[auth] SMTP is not configured. Password reset URL for ${email}: ${resetUrl}`);
+    return false;
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT || 587),
+    secure: String(SMTP_PORT || 587) === '465',
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+
+  await transporter.sendMail({
+    from: MAIL_FROM || SMTP_USER,
+    to: email,
+    subject: 'Reset your Qureo password',
+    text: `Reset your Qureo password using this link: ${resetUrl}\n\nThis link expires in 30 minutes.`,
+    html: `<p>Reset your Qureo password using the link below.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
+  });
+  return true;
 }
 
 async function verifyGoogleToken(idToken) {
@@ -169,6 +202,63 @@ router.post('/signin', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/forgot-password', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const genericResponse = {
+    message: 'If an account exists for that email, a password reset link has been sent.',
+  };
+
+  if (!email) return res.status(400).json({ message: 'Email is required' });
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user || !user.passwordHash) return res.json(genericResponse);
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetTokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    user.passwordResetExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await user.save();
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
+    await sendPasswordResetEmail({ email, resetUrl });
+    return res.json(genericResponse);
+  } catch (err) {
+    console.error('[auth] Password reset request failed:', err);
+    return res.json(genericResponse);
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+
+  if (!token || password.length < 8) {
+    return res.status(400).json({ message: 'A valid reset token and password of at least 8 characters are required' });
+  }
+
+  try {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      passwordResetTokenHash: tokenHash,
+      passwordResetExpiresAt: { $gt: new Date() },
+    });
+
+    if (!user) return res.status(400).json({ message: 'This reset link is invalid or has expired' });
+
+    user.passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    user.authProvider = 'password';
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpiresAt = null;
+    await user.save();
+
+    return res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('[auth] Password reset failed:', err);
+    return res.status(500).json({ message: 'Unable to reset password. Please try again.' });
   }
 });
 

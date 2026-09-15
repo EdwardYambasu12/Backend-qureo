@@ -8,6 +8,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const Stripe = require("stripe")
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const { notifyUser } = require("./utils/notifyUser");
 
 
 //------------------------MODELS-----------------------//
