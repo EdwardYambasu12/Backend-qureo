@@ -3,6 +3,8 @@ const NotificationToken = require('../models/NotificationToken');
 const { sendPushToToken } = require('../utils/pushService');
 const sendEmail = require('../utils/email');
 
+
+console.log("page is alive")
 /**
  * Runs every minute and fires two notifications per consultation:
  *  1. 5 minutes before appointmentTime  (notifiedBefore flag)

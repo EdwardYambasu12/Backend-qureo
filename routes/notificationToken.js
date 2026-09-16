@@ -10,29 +10,68 @@ const resolveUserId = (req) => req.userId || req.body?.userId || req.query?.user
 // 🔹 Save or update user's FCM token
 router.post("/save-token", auth, async (req, res) => {
   try {
-    const { token } = req.body || {};
+    const { token, platform = "unknown" } = req.body || {};
     const userId = resolveUserId(req);
 
     if (!token) {
       return res.status(400).json({ message: "token is required" });
     }
 
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    console.log("📱 Saving push token:", {
+      userId,
+      platform,
+      tokenPreview: `${token.substring(0, 15)}...`,
+    });
+
     const existing = await NotificationToken.findOne({ userId });
 
     if (existing) {
       existing.token = token;
-      existing.updatedAt = Date.now();
+      existing.platform = platform;
+      existing.updatedAt = new Date();
+
       await existing.save();
-      return res.json({ message: "Token updated", token });
+
+      console.log("✅ Push token UPDATED:", {
+        userId,
+        platform,
+      });
+
+      return res.json({
+        message: "Token updated",
+        token,
+        userId,
+        platform,
+      });
     }
 
-    const newToken = new NotificationToken({ userId, token });
-    await newToken.save();
+    const newToken = await NotificationToken.create({
+      userId,
+      token,
+      platform,
+    });
 
-    res.json({ message: "Token saved successfully", token, userId });
+    console.log("✅ Push token CREATED:", {
+      userId,
+      platform,
+    });
+
+    return res.json({
+      message: "Token saved successfully",
+      token,
+      userId,
+      platform,
+    });
+
   } catch (err) {
-    console.error("Error saving token:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("❌ Error saving token:", err);
+    return res.status(500).json({
+      message: "Server error",
+    });
   }
 });
 

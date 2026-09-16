@@ -41,19 +41,48 @@ const isSlotAvailableFromDoctorSchedule = (doctor, appointmentTime) => {
   return ranges.some((range) => isWithinRange(appointmentTime, range));
 };
 
-const notifyViaAllChannels = async ({ ownerId, email, phone, subject, text, pushTitle, pushBody, pushData = {} }) => {
-  await Promise.allSettled([
+const notifyViaAllChannels = async ({
+  ownerId,
+  email,
+  phone,
+  subject,
+  text,
+  pushTitle,
+  pushBody,
+  pushData = {}
+}) => {
+
+  console.log("🔥 notifyViaAllChannels CALLED");
+  console.log("ownerId:", ownerId);
+  console.log("pushData:", pushData);
+
+  const results = await Promise.allSettled([
     sendEmail(email, subject, text),
     sendSMS(phone, text),
-    sendSMS.sendWhatsApp ? sendSMS.sendWhatsApp(phone, text) : Promise.resolve(false),
-    notifyUser({
-      userId: ownerId,
-      type: pushData.type,
-      title: pushTitle,
-      body: pushBody,
-      data: pushData,
-    }),
+    sendSMS.sendWhatsApp
+      ? sendSMS.sendWhatsApp(phone, text)
+      : Promise.resolve(false),
+
+    (async () => {
+      console.log("🔥 ABOUT TO CALL notifyUser()");
+
+      const result = await notifyUser({
+        userId: "6a7d01ba201f4228c4f01f54",
+        type: pushData.type,
+        title: pushTitle,
+        body: pushBody,
+        data: pushData,
+      });
+
+      console.log("🔥 notifyUser() FINISHED:", result);
+
+      return result;
+    })(),
   ]);
+
+  console.log("🔥 notifyViaAllChannels RESULTS:", results);
+
+  return results;
 };
 
 const resolveDurationMinutes = (duration, durationMinutes) => {
@@ -413,18 +442,38 @@ router.get("/patient/:patientId", auth, async (req, res) => {
 
 // Get all chat sessions for a user (patient or doctor)
 router.get('/chat-sessions', auth, async (req, res) => {
+  console.log('🔥🔥 CHAT-SESSIONS ROUTE REACHED');
+
   try {
-    const requestedUserId = req.query.userId || req.query.patientId || req.query.doctorId;
+    console.log('🔥 req.userId:', req.userId);
+    console.log('🔥 req.query:', req.query);
+
+    const requestedUserId =
+      req.query.userId ||
+      req.query.patientId ||
+      req.query.doctorId;
+
     const userId = req.userId || requestedUserId;
+
+    console.log('🔥 resolved userId:', userId);
+
     if (!userId) {
-      return res.status(400).json({ message: 'userId is required' });
+      return res.status(400).json({
+        message: 'userId is required',
+      });
     }
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'userId must be a valid MongoDB ObjectId' });
+      return res.status(400).json({
+        message: 'userId must be a valid MongoDB ObjectId',
+      });
     }
 
+    console.log('🔥 ObjectId valid');
+
     const objectUserId = new mongoose.Types.ObjectId(userId);
+
+    console.log('🔥 About to query Consultation');
 
     const consultations = await Consultation.find({
       $or: [
@@ -432,26 +481,36 @@ router.get('/chat-sessions', auth, async (req, res) => {
         { doctor: objectUserId },
       ],
       mode: 'chat',
-    }).sort({ updatedAt: -1 }).lean();
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    console.log('🔥 Consultation query completed:', consultations.length);
 
     const normalized = consultations.map((consultation) => ({
       ...consultation,
-      lastMessage: Array.isArray(consultation.chat) && consultation.chat.length > 0
-        ? consultation.chat[consultation.chat.length - 1]
-        : null,
+      lastMessage:
+        Array.isArray(consultation.chat) && consultation.chat.length > 0
+          ? consultation.chat[consultation.chat.length - 1]
+          : null,
     }));
 
-    return res.json({ consultations: normalized });
-  } catch (err) {
-    console.error('[chat-sessions] Failed to fetch consultations:', {
-      message: err?.message,
-      name: err?.name,
-      userId: req.userId || req.query.userId || req.query.patientId || req.query.doctorId,
+    console.log('🔥 Sending chat sessions response');
+
+    return res.json({
+      consultations: normalized,
     });
-    return res.status(500).json({ message: 'Failed to fetch consultation chats', error: err.message });
+
+  } catch (err) {
+    console.error('🔥🔥 CHAT-SESSIONS ERROR:', err);
+    console.error('Stack:', err?.stack);
+
+    return res.status(500).json({
+      message: 'Failed to fetch consultation chats',
+      error: err.message,
+    });
   }
 });
-
 router.get("/:id", async (req, res) => {
   try {
     const consultation = await Consultation.findById(req.params.id).lean();

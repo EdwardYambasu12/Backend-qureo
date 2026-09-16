@@ -57,6 +57,7 @@ async function notifyUser({
     return { success: false, reason: 'Missing userId' };
   }
 
+  console.log("recieved something")
   const typeConfig = getNotificationTypeConfig(type);
   const category = typeConfig.category;
 
