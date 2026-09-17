@@ -632,7 +632,7 @@ router.post('/pay-provider', async (req, res) => {
           title: 'Payment completed',
           body: `You paid $${Number(amount).toFixed(2)} to ${providerName}.`,
           balancedTitle: 'Payment completed',
-          balancedBody: 'Your wallet payment was completed successfully.',
+          balancedBody: 'Your wallet payment was completed successfully. Check your wallet balance and Notification. THANKS.',
           genericTitle: 'You have a new update in Qureo',
           genericBody: 'Open Qureo to view your wallet update.',
           route: '/health-wallet',
