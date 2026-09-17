@@ -67,7 +67,7 @@ const notifyViaAllChannels = async ({
       console.log("🔥 ABOUT TO CALL notifyUser()");
 
       const result = await notifyUser({
-        userId: "6a7d01ba201f4228c4f01f54",
+        userId: ownerId,
         type: pushData.type,
         title: pushTitle,
         body: pushBody,
