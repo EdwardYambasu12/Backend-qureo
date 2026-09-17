@@ -16,6 +16,8 @@ const buildNotExpiredFilter = (now = new Date()) => ({
   ],
 });
 
+
+
 const formatDateKeyInTimezone = (date, timezone) => {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
@@ -406,104 +408,309 @@ class ReminderNotificationScheduler {
     }
   }
 
-  async processDueReminders() {
-    const now = new Date();
+async processDueReminders() {
+  const now = new Date();
 
-    const medications = await Medication.find({ isActive: true, remindMe: true, ...buildNotExpiredFilter(now) }).lean();
-    if (!medications.length) return;
+  const medications = await Medication.find({
+    isActive: true,
+    isCompleted: false,
+  }).lean();
 
-    for (const med of medications) {
-      const timezone = med?.timezone || 'UTC';
-      const timeKey = formatTimeKeyInTimezone(now, timezone);
-      const dateKey = formatDateKeyInTimezone(now, timezone);
-      const userId = String(med.user);
-      const dueDoses = (med.scheduledTimes || []).filter((dose) => this.getDoseReminderTime(dose, now) === timeKey);
-      if (!dueDoses.length) continue;
+  if (!medications.length) {
+    return;
+    console.log("meds found for reporting")
+  }
 
-      const profile = await Profile.findOne({ user: userId }).lean();
-      const notifications = profile?.notifications || {};
-
-      if (notifications.reminders === false) {
-        this.stats.skipped += 1;
-        continue;
-      }
-
-      const user = await User.findById(userId).lean();
-      const tokenDoc = await NotificationToken.findOne({ userId }).lean();
-
-      for (const dose of dueDoses) {
-        if (this.isDoseTakenTodayInTimezone(dose, now, timezone)) continue;
-        if (this.isDoseSkippedTodayInTimezone(dose, now, timezone)) continue;
-
-        const title = `Medication Reminder: ${med.name}`;
-        const body = `${med.dosage} • ${med.frequency} • Due now (${timeKey})`;
-
-        if (notifications.push !== false) {
-          const alreadyPush = await this.alreadyDispatched({
-            userId,
-            medicationId: med._id,
-            reminderDate: dateKey,
-            reminderTime: timeKey,
-            channel: 'push',
-          });
-
-          if (!alreadyPush) {
-            const pushResult = await sendPushToToken(tokenDoc?.token, title, body, {
-              type: 'medication_reminder',
-              medicationId: String(med._id),
-              dueTime: timeKey,
-              route: '/health/medications', // Deep-link to medications page
-            });
-
-            await this.recordDispatch({
-              userId,
-              medicationId: med._id,
-              reminderDate: dateKey,
-              reminderTime: timeKey,
-              channel: 'push',
-              success: Boolean(pushResult.success),
-              reason: pushResult.reason || '',
-            });
-
-            if (pushResult.success) this.stats.pushSent += 1;
-            else this.stats.pushFailed += 1;
-          }
-        }
-
-        if (notifications.email === true && user?.email) {
-          const alreadyEmail = await this.alreadyDispatched({
-            userId,
-            medicationId: med._id,
-            reminderDate: dateKey,
-            reminderTime: timeKey,
-            channel: 'email',
-          });
-
-          if (!alreadyEmail) {
-            const sent = await sendEmail(
-              user.email,
-              `Qureo Reminder: ${med.name}`,
-              `It's time to take ${med.name} (${med.dosage}). Scheduled for ${timeKey}.`,
-              `<p>It is time to take <strong>${med.name}</strong> (${med.dosage}).</p><p>Scheduled time: <strong>${timeKey}</strong></p>`
-            );
-
-            await this.recordDispatch({
-              userId,
-              medicationId: med._id,
-              reminderDate: dateKey,
-              reminderTime: timeKey,
-              channel: 'email',
-              success: Boolean(sent),
-              reason: sent ? '' : 'Email send failed',
-            });
-
-            if (sent) this.stats.emailSent += 1;
-            else this.stats.emailFailed += 1;
-          }
-        }
-      }
+  for (const medication of medications) {
+    try {
+      await this.processMedicationReminder(medication, now);
+    } catch (error) {
+      console.error(
+        `[Medication Reminder] Failed for ${medication._id}:`,
+        error
+      );
     }
   }
+}
+
+/**
+ * Process reminders for a single medication.
+ */
+async processMedicationReminder(medication, now) {
+  const userId = String(medication.user);
+
+  // TODO: Get timezone from the user's profile.
+  const timezone = 'UTC';
+
+  const timeKey = formatTimeKeyInTimezone(now, timezone);
+  const dateKey = formatDateKeyInTimezone(now, timezone);
+
+  /*
+   * Find doses that are scheduled for the current time.
+   *
+   * Example:
+   * dose.time = "08:00 AM"
+   */
+  const dueDoses = (medication.dosages || []).filter((dose) => {
+    return this.getDoseReminderTime(dose.time, now) === timeKey;
+  });
+
+  if (!dueDoses.length) {
+    return;
+  }
+
+  // Get user's notification preferences
+  const profile = await Profile.findOne({
+    user: userId,
+  }).lean();
+
+  const notifications = profile?.notifications || {};
+
+  // User has disabled all reminders
+  if (notifications.reminders === false) {
+    this.stats.skipped += 1;
+    return;
+  }
+
+  // Get user information for email
+  const user = await User.findById(userId).lean();
+
+  // Get push notification token
+  const tokenDoc = await NotificationToken.findOne({
+    userId,
+  }).lean();
+
+  /*
+   * Process every dose that is due.
+   */
+  for (const dose of dueDoses) {
+    await this.processDoseReminder({
+      medication,
+      dose,
+      user,
+      tokenDoc,
+      notifications,
+      userId,
+      dateKey,
+      timeKey,
+    });
+  }
+}
+
+/**
+ * Process push and email reminders for a single dose.
+ */
+async processDoseReminder({
+  medication,
+  dose,
+  user,
+  tokenDoc,
+  notifications,
+  userId,
+  dateKey,
+  timeKey,
+}) {
+  /*
+   * Don't remind the user if the dose has already been taken.
+   */
+  if (dose.taken) {
+    return;
+  }
+
+  /*
+   * Don't remind the user if the dose was skipped.
+   */
+  if (dose.skippedAt) {
+    return;
+  }
+
+  const title = `Medication Reminder: ${medication.medicineName}`;
+
+  const body = this.buildMedicationNotificationBody(
+    medication,
+    dose
+  );
+
+  /*
+   * Send push notification.
+   */
+  if (notifications.push !== false) {
+    await this.sendMedicationPushReminder({
+      medication,
+      dose,
+      tokenDoc,
+      title,
+      body,
+      userId,
+      dateKey,
+      timeKey,
+    });
+  }
+
+  /*
+   * Send email notification.
+   */
+  if (notifications.email === true && user?.email) {
+    await this.sendMedicationEmailReminder({
+      medication,
+      dose,
+      user,
+      userId,
+      dateKey,
+      timeKey,
+    });
+  }
+}
+
+/**
+ * Build push notification body.
+ */
+buildMedicationNotificationBody(medication, dose) {
+  const details = [
+    medication.strength,
+    medication.frequency,
+  ].filter(Boolean);
+
+  const medicationDetails = details.length
+    ? `${details.join(' • ')} • `
+    : '';
+
+  return `${medicationDetails}Due now (${dose.time})`;
+}
+
+/**
+ * Send medication push notification.
+ */
+async sendMedicationPushReminder({
+  medication,
+  dose,
+  tokenDoc,
+  title,
+  body,
+  userId,
+  dateKey,
+  timeKey,
+}) {
+  const alreadyPush = await this.alreadyDispatched({
+    userId,
+    medicationId: medication._id,
+    reminderDate: dateKey,
+    reminderTime: timeKey,
+    channel: 'push',
+  });
+
+  if (alreadyPush) {
+    return;
+  }
+
+  const pushResult = await sendPushToToken(
+    tokenDoc?.token,
+    title,
+    body,
+    {
+      type: 'medication_reminder',
+      medicationId: String(medication._id),
+      dueTime: dose.time,
+      route: '/health/medications',
+    }
+  );
+
+  await this.recordDispatch({
+    userId,
+    medicationId: medication._id,
+    reminderDate: dateKey,
+    reminderTime: timeKey,
+    channel: 'push',
+    success: Boolean(pushResult.success),
+    reason: pushResult.reason || '',
+  });
+
+  if (pushResult.success) {
+    this.stats.pushSent += 1;
+  } else {
+    this.stats.pushFailed += 1;
+  }
+}
+
+/**
+ * Send medication email reminder.
+ */
+async sendMedicationEmailReminder({
+  medication,
+  dose,
+  user,
+  userId,
+  dateKey,
+  timeKey,
+}) {
+  const alreadyEmail = await this.alreadyDispatched({
+    userId,
+    medicationId: medication._id,
+    reminderDate: dateKey,
+    reminderTime: timeKey,
+    channel: 'email',
+  });
+
+  if (alreadyEmail) {
+    return;
+  }
+
+  const subject = `Qureo Reminder: ${medication.medicineName}`;
+
+  const textMessage = `
+It's time to take ${medication.medicineName}
+(${medication.strength || ''}).
+
+Scheduled time: ${dose.time}
+  `.trim();
+
+  const htmlMessage = `
+    <p>
+      It is time to take
+      <strong>${medication.medicineName}</strong>
+      (${medication.strength || ''}).
+    </p>
+
+    <p>
+      Scheduled time:
+      <strong>${dose.time}</strong>
+    </p>
+
+    ${
+      medication.instructions
+        ? `
+          <p>
+            Instructions:
+            <strong>${medication.instructions}</strong>
+          </p>
+        `
+        : ''
+    }
+  `;
+
+  const sent = await sendEmail(
+    user.email,
+    subject,
+    textMessage,
+    htmlMessage
+  );
+
+  await this.recordDispatch({
+    userId,
+    medicationId: medication._id,
+    reminderDate: dateKey,
+    reminderTime: timeKey,
+    channel: 'email',
+    success: Boolean(sent),
+    reason: sent ? '' : 'Email send failed',
+  });
+
+  if (sent) {
+    this.stats.emailSent += 1;
+  } else {
+    this.stats.emailFailed += 1;
+  }
+}
 
   async runTick() {
     if (this.isRunning) return;
