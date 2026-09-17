@@ -416,87 +416,77 @@ async processDueReminders() {
     isCompleted: false,
   }).lean();
 
+
   if (!medications.length) {
+     console.log("meds found for reporting")
     return;
-    console.log("meds found for reporting")
+   
   }
 
-  for (const medication of medications) {
-    try {
-      await this.processMedicationReminder(medication, now);
-    } catch (error) {
-      console.error(
-        `[Medication Reminder] Failed for ${medication._id}:`,
-        error
-      );
-    }
+ for (const medication of medications) {
+  console.log("meds found for reporting", medication);
+  try {
+    const user = await User.findById(medication.user).select("timezone");
+    const timezone = user?.timezone || "UTC";
+
+    await this.processMedicationReminder(medication, now, timezone);
+  } catch (error) {
+    console.error(
+      `[Medication Reminder] Failed for ${medication._id}:`,
+      error
+    );
   }
+}
 }
 
 /**
  * Process reminders for a single medication.
  */
-async processMedicationReminder(medication, now) {
-  const userId = String(medication.user);
+async processMedicationReminder(medication, now, timezone = "UTC") {
+  const {
+    _id,
+    user,
+    medicineName,
+    dosages = [],
+    durationEndDate,
+    isActive,
+    isCompleted,
+  } = medication;
 
-  // TODO: Get timezone from the user's profile.
-  const timezone = 'UTC';
+  if (!isActive || isCompleted) {
+    console.log(`[Medication Reminder] Skipping ${_id} (inactive/completed)`);
+    return;
+  }
 
-  const timeKey = formatTimeKeyInTimezone(now, timezone);
-  const dateKey = formatDateKeyInTimezone(now, timezone);
+  if (durationEndDate && now > new Date(durationEndDate)) {
+    console.log(`[Medication Reminder] Skipping ${_id} (duration ended)`);
+    return;
+  }
 
-  /*
-   * Find doses that are scheduled for the current time.
-   *
-   * Example:
-   * dose.time = "08:00 AM"
-   */
-  const dueDoses = (medication.dosages || []).filter((dose) => {
-    return this.getDoseReminderTime(dose.time, now) === timeKey;
+  const WINDOW_MINUTES = 5;
+
+  const dueDosage = dosages.find((dose) => {
+    if (dose.taken) return false;
+    return this.isWithinWindow(dose.time, now, WINDOW_MINUTES, timezone);
   });
 
-  if (!dueDoses.length) {
+  if (!dueDosage) {
+    console.log(`[Medication Reminder] No dosage due right now for ${_id}`);
     return;
   }
 
-  // Get user's notification preferences
-  const profile = await Profile.findOne({
-    user: userId,
-  }).lean();
+  console.log(
+    `[Medication Reminder] Dosage due for ${medicineName} (user ${user}) at ${dueDosage.time}`
+  );
 
-  const notifications = profile?.notifications || {};
-
-  // User has disabled all reminders
-  if (notifications.reminders === false) {
-    this.stats.skipped += 1;
-    return;
-  }
-
-  // Get user information for email
-  const user = await User.findById(userId).lean();
-
-  // Get push notification token
-  const tokenDoc = await NotificationToken.findOne({
-    userId,
-  }).lean();
-
-  /*
-   * Process every dose that is due.
-   */
-  for (const dose of dueDoses) {
-    await this.processDoseReminder({
-      medication,
-      dose,
-      user,
-      tokenDoc,
-      notifications,
-      userId,
-      dateKey,
-      timeKey,
-    });
-  }
+  await this.notifyUser({
+    userId: user,
+    medicationId: _id,
+    dosageId: dueDosage._id,
+    title: "Time to take your medication",
+    body: `${medicineName} — scheduled dose at ${dueDosage.time}`,
+  });
 }
-
 /**
  * Process push and email reminders for a single dose.
  */
