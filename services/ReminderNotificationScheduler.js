@@ -468,7 +468,7 @@ async processMedicationReminder(medication, now, timezone = "UTC") {
   const dueDosage = dosages.find((dose) => {
     if (dose.taken) return false;
     return this.isWithinWindow(dose.time, now, WINDOW_MINUTES, timezone);
-  });
+  });x
 
   if (!dueDosage) {
     console.log(`[Medication Reminder] No dosage due right now for ${_id}`);

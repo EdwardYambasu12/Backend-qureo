@@ -94,11 +94,13 @@ class ConsultationReminderScheduler {
       }).lean();
 
       for (const c of starting) {
+        // Ring notification - device will ring with alarm sound and vibration
         await this._notify(c, {
           title: '🔔 Your consultation is starting now!',
           body: `Your consultation with ${c.doctor_?.name || 'your doctor'} is starting. Join now!`,
           type: 'consultation_started',
           flag: 'notifiedStart',
+          ring: true,
         });
       }
     } catch (err) {
@@ -108,7 +110,7 @@ class ConsultationReminderScheduler {
     }
   }
 
-  async _notify(consultation, { title, body, type, flag }) {
+  async _notify(consultation, { title, body, type, flag, ring }) {
     const patientId = String(consultation.patient);
     const roomId = consultation.roomId;
 
@@ -123,7 +125,8 @@ class ConsultationReminderScheduler {
           type,
           consultationId: String(consultation._id),
           roomId,
-          route: `/call/${roomId}`, // Deep-link to consultation call screen
+          route: `/call/${roomId}`,
+          ring: ring !== false,
         }
       );
 

@@ -235,36 +235,53 @@ async function sendPushToToken(token, title, body, data = {}) {
       route: data.route || '/notification', // fallback to notification page if no route specified
     });
 
-    // Build the message payload
-    const message = {
-      token,
-      notification: {
-        title,
-        body,
-      },
-      data: enrichedData,
-      android: {
-        ttl: 3600, // 1 hour
-        priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'qureo-alerts', // Must match the channel created in the app
-          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            alert: {
-              title,
-              body,
-            },
-            badge: 1,
-          },
-        },
-      },
+    // Determine if this notification should ring the device (consultation alerts)
+    const shouldRing = data.ring === true || (data.type && data.type.startsWith('consultation_'));
+
+    const androidNotification = {
+      channelId: 'qureo-alerts',
+      clickAction: 'FLUTTER_NOTIFICATION_CLICK',
     };
+
+    if (shouldRing) {
+      androidNotification.sound = 'qureo_alarm';
+      androidNotification.vibrate = [0, 500, 200, 500, 200, 1000];
+      androidNotification.lightSettings = { color: '#FF5722', lightOnDuration: 500, lightOffDuration: 500 };
+      androidNotification.visibility = 1;
+      androidNotification.audioAttributes = {
+        usage: 2,
+        flags: 64,
+      };
+    } else {
+      androidNotification.sound = 'default';
+    }
+
+     // Build the message payload
+     const message = {
+       token,
+       notification: {
+         title,
+         body,
+       },
+       data: enrichedData,
+       android: {
+         ttl: 3600, // 1 hour
+         priority: 'high',
+         notification: androidNotification,
+       },
+       apns: {
+         payload: {
+           aps: {
+             sound: 'default',
+             alert: {
+               title,
+               body,
+             },
+             badge: 1,
+           },
+         },
+       },
+     };
 
     const messageId = await messaging.send(message);
 
@@ -313,34 +330,47 @@ async function sendPushToMultipleTokens(tokens, title, body, data = {}) {
       route: data.route || '/notification',
     });
 
-    const message = {
-      notification: {
-        title,
-        body,
-      },
-      data: enrichedData,
-      android: {
-        ttl: 3600,
-        priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'qureo-alerts',
-          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            alert: {
-              title,
-              body,
-            },
-            badge: 1,
-          },
-        },
-      },
+    const shouldRing = data.ring === true || (data.type && data.type.startsWith('consultation_'));
+
+    const androidNotification = {
+      channelId: 'qureo-alerts',
+      clickAction: 'FLUTTER_NOTIFICATION_CLICK',
     };
+
+    if (shouldRing) {
+      androidNotification.sound = 'qureo_alarm';
+      androidNotification.vibrate = [0, 500, 200, 500, 200, 1000];
+      androidNotification.lightSettings = { color: '#FF5722', lightOnDuration: 500, lightOffDuration: 500 };
+      androidNotification.visibility = 1;
+      androidNotification.audioAttributes = { usage: 2, flags: 64 };
+    } else {
+      androidNotification.sound = 'default';
+    }
+
+     const message = {
+       notification: {
+         title,
+         body,
+       },
+       data: enrichedData,
+       android: {
+         ttl: 3600,
+         priority: 'high',
+         notification: androidNotification,
+       },
+       apns: {
+         payload: {
+           aps: {
+             sound: 'default',
+             alert: {
+               title,
+               body,
+             },
+             badge: 1,
+           },
+         },
+       },
+     };
 
     const response = await messaging.sendEachForMulticast({
       ...message,

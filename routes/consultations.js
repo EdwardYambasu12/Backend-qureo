@@ -149,6 +149,7 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
                   roomId: c.roomId,
                   type: 'consultation_30min',
                   route: `/call/${c.roomId}`,
+                  ring: true,
                 },
               });
               console.log(`[consultation-check] Sent 30-min push to patient ${c.patient}`);
@@ -213,6 +214,7 @@ const resolveDurationMinutes = (duration, durationMinutes) => {
                   roomId: c.roomId,
                   type: 'consultation_started',
                   route: `/call/${c.roomId}`,
+                  ring: true,
                 },
               });
               console.log(`[consultation-check] Sent start push to patient ${c.patient}`);
